@@ -149,9 +149,27 @@ jobs:
     - name: 克隆源代码
       working-directory: /workdir
       id: clone
+      env:
+        GIT_TERMINAL_PROMPT: '0'
       run: |
         df -hT $PWD
-        git clone $REPO_URL -b $REPO_BRANCH openwrt --single-branch
+        # token 走 HTTP Authorization 头（同 actions/checkout 的做法；对 git 版本/重定向更稳），
+        # 失败再退回 env 文件里的 REPO_URL（URL 内嵌 token）形式。
+        token_part="${REPO_URL#https://}"; token_part="${token_part%@*}"
+        clone_url="https://${REPO_URL#*@}"
+        echo "REPO_URL length: ${#REPO_URL} / token part length: ${#token_part} / job token length: ${#KERNEL66_REPO_TOKEN}"
+        echo "REPO_URL sha256: $(printf '%s' "$REPO_URL" | sha256sum | cut -d' ' -f1)"
+        if [ -z "$KERNEL66_REPO_TOKEN" ]; then
+          echo "::error ::KERNEL66_REPO_TOKEN 为空，请检查仓库 secret MY_SECRET_TOKEN"
+          exit 1
+        fi
+        auth_header="AUTHORIZATION: Basic $(printf 'x-access-token:%s' "$KERNEL66_REPO_TOKEN" | base64 -w0)"
+        if ! git -c "http.https://github.com/.extraheader=${auth_header}" \
+            clone "$clone_url" -b "$REPO_BRANCH" openwrt --single-branch; then
+          echo "::warning ::extraheader 方式克隆失败，改用 REPO_URL（内嵌 token）重试"
+          rm -rf openwrt
+          git clone "$REPO_URL" -b "$REPO_BRANCH" openwrt --single-branch
+        fi
         ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
         cd openwrt
         git config --global user.email "LunaticKochiya@github.com"
