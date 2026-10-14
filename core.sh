@@ -86,6 +86,18 @@ function init_openwrt_patch_common() {
 		echo "----$Matrix_Target----busybox-nohup-xxd-devm---"
 	fi
 
+	# SDK 的 feeds.conf.default 第一行 base 由 target/sdk/Makefile 从 git remote.origin.url 生成，
+	# 而仓库地址（REPO_URL）里带仓库 token；SDK 会作为 Release 资产发布，
+	# 这里清空 BASE_FEED，生成的 SDK 不再包含带 key 的 base 地址。（移植自 AP-action-IPQ）
+	local sdk_makefile="openwrt/target/sdk/Makefile"
+	local sdk_base_feed_marker="# build: BASE_FEED cleared to avoid leaking repo credentials"
+	if [ -f "$sdk_makefile" ]; then
+		if ! grep -Fq "$sdk_base_feed_marker" "$sdk_makefile"; then
+			printf '\n%s\nBASE_FEED:=\n' "$sdk_base_feed_marker" >> "$sdk_makefile" || return 1
+		fi
+		echo "----$Matrix_Target----sdk-base-feed-cleared---"
+	fi
+
 	if [ "$Firewall_Allow_WAN" = "1" ]; then
 		sed -i '/^	commit$/i\
 		set firewall.@zone[1].input="ACCEPT"
@@ -95,7 +107,13 @@ function init_openwrt_patch_common() {
 	fi
 
 	if [ "$TRY_BBR_V3" = "1" ]; then
-		[ -d $OpenWrt_PATCH_FILE_DIR/mypatch-bbr-v3 ] && cp -r $OpenWrt_PATCH_FILE_DIR/mypatch-bbr-v3/* $OpenWrt_PATCH_FILE_DIR/mypatch-custom-$Matrix_Target
+		# 25.12 + 6.6 的 BBR v3 补丁放在 mypatch-core-66/mypatch-bbr-v3，
+		# 构建时拷进 mypatch-core 一起打（同 AP-action-IPQ）。
+		if [ ! -d $OpenWrt_PATCH_FILE_DIR/mypatch-core-66/mypatch-bbr-v3 ] || [ ! -d $OpenWrt_PATCH_FILE_DIR/mypatch-core ]; then
+			echo "::error ::BBR v3 patch directory is incomplete"
+			return 1
+		fi
+		cp -f $OpenWrt_PATCH_FILE_DIR/mypatch-core-66/mypatch-bbr-v3/*.patch $OpenWrt_PATCH_FILE_DIR/mypatch-core/
 		echo "----$Matrix_Target----bbr-v3---"
 		echo "TRY_BBR_V3_NAME=_BBR_V3" >> $GITHUB_ENV
 	fi
@@ -206,132 +224,162 @@ function ln_openwrt() {
 	ls -l /workdir/openwrt
 }
 
-function apply_sfe_live_conntrack_fix() {
-	# fast-classifier 缓存了 nf_conn 指针，5 元组复用/销毁通知丢失时会解引用已释放的
-	# conntrack（内核 panic），改用当前报文引用的 ct。见
-	# openwrt-2410/sfe-fast-classifier-use-live-conntrack.patch
-	# （移植自 AP-action-IPQ 7337ea2 / efba8ce）。
-	# 调用位置：add_openwrt_sfe_ipt_k66（package/shortcut-fe）、
-	# add_openwrt_sfe_nft_k66（package/turboacc/shortcut-fe），cwd 为 openwrt。
-	local patch_file="../$OpenWrt_PATCH_FILE_DIR/sfe-fast-classifier-use-live-conntrack.patch"
-	local base=""
+function copy_openwrt_turboacc_nft_packages() {
+	local package_source="$1"
+	local firewall4_version nftables_version libnftnl_version package_dir
 
-	if [ -f package/turboacc/shortcut-fe/fast-classifier/src/fast-classifier.c ]; then
-		base="package/turboacc"
-	elif [ -f package/shortcut-fe/fast-classifier/src/fast-classifier.c ]; then
-		base="package"
+	if [ ! -d "$package_source" ]; then
+		echo "::error ::TurboACC package source not found: $package_source"
+		return 1
+	fi
+	for package_dir in nft-fullcone; do
+		if [ ! -d "$package_source/$package_dir" ]; then
+			echo "::error ::Missing TurboACC nft package: $package_source/$package_dir"
+			return 1
+		fi
+	done
+
+	mkdir -p openwrt/package/turboacc
+	cp -r "$package_source/nft-fullcone" openwrt/package/turboacc/ || return 1
+
+	if [ ! -f openwrt/package/network/config/firewall4/Makefile ] || \
+		[ ! -f openwrt/package/network/utils/nftables/Makefile ] || \
+		[ ! -f openwrt/package/libs/libnftnl/Makefile ]; then
+		echo "::error ::OpenWrt nft package Makefiles are missing"
+		return 1
+	fi
+	firewall4_version=$(grep -o 'PKG_SOURCE_VERSION:=.*' openwrt/package/network/config/firewall4/Makefile | cut -d '=' -f 2)
+	nftables_version=$(grep -o 'PKG_VERSION:=.*' openwrt/package/network/utils/nftables/Makefile | cut -d '=' -f 2)
+	libnftnl_version=$(grep -o 'PKG_VERSION:=.*' openwrt/package/libs/libnftnl/Makefile | cut -d '=' -f 2)
+
+	if [ ! -d "$package_source/firewall4-$firewall4_version" ]; then
+		firewall4_version=$(grep -o 'FIREWALL4_VERSION=.*' "$package_source/version" | cut -d '=' -f 2)
+	fi
+	if [ ! -d "$package_source/nftables-$nftables_version" ]; then
+		nftables_version=$(grep -o 'NFTABLES_VERSION=.*' "$package_source/version" | cut -d '=' -f 2)
+	fi
+	if [ ! -d "$package_source/libnftnl-$libnftnl_version" ]; then
+		libnftnl_version=$(grep -o 'LIBNFTNL_VERSION=.*' "$package_source/version" | cut -d '=' -f 2)
 	fi
 
-	if [ ! -f "$patch_file" ]; then
-		echo "sfe live-conntrack fix patch not found: $patch_file" >&2
-		return 0
-	fi
-	if [ -z "$base" ]; then
-		echo "sfe: shortcut-fe source not found, skip live-conntrack fix" >&2
-		return 0
-	fi
-	if grep -q 'fast_classifier_update_protocol(conn->sic, ct)' "$base/shortcut-fe/fast-classifier/src/fast-classifier.c"; then
-		echo "sfe: live-conntrack fix already applied"
-		return 0
-	fi
+	for package_dir in \
+		"firewall4-$firewall4_version/firewall4" \
+		"nftables-$nftables_version/nftables" \
+		"libnftnl-$libnftnl_version/libnftnl"; do
+		if [ ! -d "$package_source/$package_dir" ]; then
+			echo "::error ::Missing TurboACC nft replacement: $package_source/$package_dir"
+			return 1
+		fi
+	done
 
-	echo "----sfe: applying fast-classifier stale-conntrack fix ($base)----"
-	patch -d "$base" -p1 --no-backup-if-mismatch --quiet < "$patch_file" || exit 1
+	rm -rf openwrt/package/libs/libnftnl \
+		openwrt/package/network/config/firewall4 \
+		openwrt/package/network/utils/nftables
+	mkdir -p openwrt/package/libs openwrt/package/network/config openwrt/package/network/utils
+	cp -RT "$package_source/firewall4-$firewall4_version/firewall4" openwrt/package/network/config/firewall4 || return 1
+	cp -RT "$package_source/libnftnl-$libnftnl_version/libnftnl" openwrt/package/libs/libnftnl || return 1
+	cp -RT "$package_source/nftables-$nftables_version/nftables" openwrt/package/network/utils/nftables || return 1
 }
 
-function add_openwrt_sfe_ipt_k66() {
-	if [[ "$Matrix_Target" == *iptables ]]; then
-		for file4 in package-configs/$OpenWrt_PATCH_FILE_DIR/*-iptables.config; do     echo "# ADD TURBOACC
+# 25.12 + Linux 6.6 的 SFE/TurboACC（移植自 AP-action-IPQ core-2512-ipq.sh add_openwrt_sfe_66_2512）：
+# turboacc 用固定 commit 取包（不再跟随浮动分支 / luci 脚本），并套用 stale-conntrack 修复。
+function add_openwrt_sfe_66_2512() {
+	local config_name="${Target_CFG_Machine}-${Matrix_Target}.config"
+	local config_file="package-configs/$OpenWrt_PATCH_FILE_DIR/$config_name"
+	local kernel_config="openwrt/target/linux/generic/config-6.6"
+	local turboacc_luci_commit="530092c532839efb96e9f328d34dbf3adff4b557"
+	local turboacc_package_commit="c56760174a4b25e2a4f7566e3e4058e75e4ac9f8"
+	local old_driver_hash="659fa82a431e15af797a6c7069faeee02810453ad8b576c51c29f95a1761a045"
+	local driver_hash="0a73db82801fc0406a5bb7ff36e7e1b03f6550797b1aca0e8ea0cec3af465d2b"
+	local temp_dir
+
+	if [ ! -s "$config_file" ]; then
+		echo "::error ::Missing package config: $config_file"
+		return 1
+	fi
+	if [ ! -f "$kernel_config" ]; then
+		echo "::error ::OpenWrt 6.6 kernel config not found: $kernel_config"
+		return 1
+	fi
+
+	temp_dir="$(mktemp -d)" || return 1
+	(
+		trap 'rm -rf "$temp_dir"' EXIT
+		mkdir -p "$temp_dir/package" openwrt/package \
+			openwrt/target/linux/generic/pending-6.6 \
+			openwrt/target/linux/generic/hack-6.6 || exit 1
+		curl -fsSL "https://codeload.github.com/chenmozhijin/turboacc/tar.gz/$turboacc_package_commit" \
+			-o "$temp_dir/package.tar.gz" || exit 1
+		tar -xzf "$temp_dir/package.tar.gz" -C "$temp_dir/package" --strip-components=1 || exit 1
+
+		rm -rf openwrt/package/shortcut-fe
+		cp -r "$temp_dir/package/shortcut-fe" openwrt/package/ || exit 1
+		sed -i "s/$old_driver_hash/$driver_hash/" \
+			openwrt/package/shortcut-fe/simulated-driver/Makefile
+		echo "----sfe: applying fast-classifier stale-conntrack fix----"
+		patch -d openwrt/package -p1 --no-backup-if-mismatch --quiet \
+			< "$OpenWrt_PATCH_FILE_DIR/sfe-fast-classifier-use-live-conntrack.patch" || exit 1
+		cp -f "$temp_dir/package/pending-6.6/613-netfilter_optional_tcp_window_check.patch" \
+			openwrt/target/linux/generic/pending-6.6/ || exit 1
+		cp -f "$temp_dir/package/hack-6.6/952-add-net-conntrack-events-support-multiple-registrant.patch" \
+			openwrt/target/linux/generic/hack-6.6/ || exit 1
+		cp -f "$temp_dir/package/hack-6.6/953-net-patch-linux-kernel-to-support-shortcut-fe.patch" \
+			openwrt/target/linux/generic/hack-6.6/ || exit 1
+
+		if [[ "$Matrix_Target" == *-nftables ]]; then
+			mkdir -p "$temp_dir/luci" openwrt/package/turboacc || exit 1
+			curl -fsSL "https://codeload.github.com/chenmozhijin/turboacc/tar.gz/$turboacc_luci_commit" \
+				-o "$temp_dir/luci.tar.gz" || exit 1
+			tar -xzf "$temp_dir/luci.tar.gz" -C "$temp_dir/luci" --strip-components=1 || exit 1
+			rm -rf openwrt/package/turboacc/luci-app-turboacc
+			cp -r "$temp_dir/luci/luci-app-turboacc" openwrt/package/turboacc/ || exit 1
+			copy_openwrt_turboacc_nft_packages "$temp_dir/package" || exit 1
+		fi
+	) || return 1
+
+	grep -q 'CONFIG_NF_CONNTRACK_CHAIN_EVENTS' "$kernel_config" || \
+		echo '# CONFIG_NF_CONNTRACK_CHAIN_EVENTS is not set' >> "$kernel_config"
+	grep -q 'CONFIG_SHORTCUT_FE' "$kernel_config" || \
+		echo '# CONFIG_SHORTCUT_FE is not set' >> "$kernel_config"
+
+	if [[ "$Matrix_Target" == *-iptables ]]; then
+		if ! grep -q '^CONFIG_PACKAGE_luci-app-turboacc-ipt=y$' "$config_file"; then
+			cat >> "$config_file" <<'EOF'
+
+# SFE acceleration for kernel 6.6 (iptables)
 CONFIG_PACKAGE_luci-app-turboacc-ipt=y
-CONFIG_PACKAGE_luci-app-turboacc-ipt_INCLUDE_PDNSD=n
-# CONFIG_PACKAGE_luci-app-fullconenat=y
-#offload
+# CONFIG_PACKAGE_luci-app-turboacc-ipt_INCLUDE_PDNSD is not set
 CONFIG_PACKAGE_kmod-ipt-offload=y
-# sfe
 CONFIG_PACKAGE_kmod-fast-classifier=y
 CONFIG_PACKAGE_kmod-shortcut-fe=y
-CONFIG_PACKAGE_kmod-shortcut-fe-cm=n
-" >> "$file4"; done
-		echo "----$Matrix_Target-----ipt-sfe---"
-		cd openwrt
-		wget -N https://raw.githubusercontent.com/chenmozhijin/turboacc/refs/heads/package/pending-6.6/613-netfilter_optional_tcp_window_check.patch -P target/linux/generic/pending-6.6/
-		wget -N https://raw.githubusercontent.com/chenmozhijin/turboacc/refs/heads/package/hack-6.6/952-add-net-conntrack-events-support-multiple-registrant.patch -P target/linux/generic/hack-6.6/
-		wget -N https://raw.githubusercontent.com/chenmozhijin/turboacc/refs/heads/package/hack-6.6/953-net-patch-linux-kernel-to-support-shortcut-fe.patch -P target/linux/generic/hack-6.6/
-		echo "# CONFIG_NF_CONNTRACK_CHAIN_EVENTS is not set" >> "./target/linux/generic/config-6.6"
-		echo "# CONFIG_SHORTCUT_FE is not set" >> "./target/linux/generic/config-6.6"
-		git clone --depth=1 --single-branch --branch "package" https://github.com/chenmozhijin/turboacc
-		mv -n turboacc/shortcut-fe ./package
-		apply_sfe_live_conntrack_fix
-		rm -rf turboacc
-		cd ../
-	fi
-}
+# CONFIG_PACKAGE_kmod-shortcut-fe-cm is not set
+EOF
+		fi
+	elif [[ "$Matrix_Target" == *-nftables ]]; then
+		if ! grep -q '^CONFIG_PACKAGE_luci-app-turboacc=y$' "$config_file"; then
+			cat >> "$config_file" <<'EOF'
 
-function add_openwrt_sfe_nft_k66() {
-	if [[ "$Matrix_Target" == *nftables ]]; then
-		for file5 in package-configs/$OpenWrt_PATCH_FILE_DIR/*-nftables.config; do     echo "# ADD TURBOACC
+# SFE acceleration for kernel 6.6 (nftables)
 CONFIG_PACKAGE_luci-app-turboacc=y
-CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_PDNSD=n
-#offload
+# CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_OFFLOADING is not set
+CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_SHORTCUT_FE=y
+# CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_SHORTCUT_FE_CM is not set
+# CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_SHORTCUT_FE_DRV is not set
 CONFIG_PACKAGE_kmod-nft-offload=y
-# sfe
 CONFIG_PACKAGE_kmod-fast-classifier=y
 CONFIG_PACKAGE_kmod-shortcut-fe=y
-CONFIG_PACKAGE_kmod-shortcut-fe-cm=n
+# CONFIG_PACKAGE_kmod-shortcut-fe-cm is not set
 CONFIG_PACKAGE_kmod-nft-fullcone=y
-" >> "$file5"; done
-		cd openwrt
-		curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh && bash add_turboacc.sh
-		apply_sfe_live_conntrack_fix
-		echo "----$Matrix_Target-----NFT-acc----"
-		cd ../
+EOF
+		fi
+	else
+		echo "::error ::Unsupported SFE matrix target: $Matrix_Target"
+		return 1
 	fi
+
+	add_openwrt_sfe_kmods
+	echo "----$Matrix_Target-----SFE-6.6----"
 }
-
-
-function add_openwrt_sfe_patch_fix_66() {
-
-if [ "$SFE_INPUT_STATUS" = "true" ]; then
-  # 25.12 把内核版本文件从 include/kernel-6.x 移到了 target/linux/generic/kernel-6.x
-  local FILE="openwrt/target/linux/generic/kernel-6.6"
-  [ -f "$FILE" ] || FILE="openwrt/include/kernel-6.6"
-
-  if [ ! -f "$FILE" ]; then
-    echo "找不到内核版本文件（kernel-6.6），跳过 SFE 补丁检查。"
-    return 0
-  fi
-
-  # 取出 LINUX_VERSION-6.6 的小版本
-  local LINUX_MINOR
-  LINUX_MINOR="$(awk -F'=' '/^LINUX_VERSION-6\.6[[:space:]]*/ { gsub(/[[:space:]]/, "", $2); print $2; exit }' "$FILE")"
-  [[ -z "$LINUX_MINOR" ]] && { echo "未在 ${FILE} 中找到 LINUX_VERSION-6.6，跳过。"; return 0; }
-
-  # 构造当前版本，例如 6.6.129
-  local CURRENT_VER
-  if [[ "$LINUX_MINOR" == .* ]]; then
-    CURRENT_VER="6.6${LINUX_MINOR}"
-  else
-    CURRENT_VER="6.6.${LINUX_MINOR}"
-  fi
-
-  echo "检测到当前内核版本：${CURRENT_VER}（来自 ${FILE}）"
-
-  # 目标版本直接写死在比较里
-  local SMALLEST
-  SMALLEST="$(printf '%s\n%s\n' "$CURRENT_VER" '6.6.129' | sort -V | head -n 1)"
-
-  if [[ "$SMALLEST" == "$CURRENT_VER" ]] && [[ "$CURRENT_VER" != "6.6.129" ]]; then
-    echo "${CURRENT_VER} < 6.6.129，开始下载并覆盖补丁..."
-    mkdir -p "openwrt/target/linux/generic/hack-6.6/"
-    wget -N "https://raw.githubusercontent.com/chenmozhijin/turboacc/a82479aaebb34c90134d66be2200a9dd50f469fb/hack-6.6/952-add-net-conntrack-events-support-multiple-registrant.patch" \
-      -O "openwrt/target/linux/generic/hack-6.6/952-add-net-conntrack-events-support-multiple-registrant.patch"
-    echo "完成：openwrt/target/linux/generic/hack-6.6/952-add-net-conntrack-events-support-multiple-registrant.patch"
-  else
-    echo "${CURRENT_VER} >= 6.6.129，不执行 wget。"
-  fi
-fi
-}
-
 
 function add_openwrt_sfe_kmods() {
 	sed -i 's/kmod-shortcut-fe-cm,kmod-shortcut-fe,kmod-fast-classifier,kmod-fast-classifier-noload,kmod-shortcut-fe-drv,//g' package-configs/kmod_exclude_list*
@@ -354,26 +402,65 @@ function add_openwrt_files() {
 	[ -e files ] && mv files openwrt/files
 }
 
-function patch_openwrt_core() {
-	for i1 in $( ls mypatch-core ); do
-		echo Applying mypatch-core $i1
-		patch -p1 --no-backup-if-mismatch --quiet < mypatch-core/$i1
+# 补丁的目标文件在这个树里存在吗？不存在就跳过（例如补丁只适用于别的平台或别的包布局）。
+# 路径取自 diff 头 "--- a/xxx" / "+++ b/xxx"，新建/删除文件（/dev/null）不检查。
+# 移植自 AP-action-IPQ core-2512-ipq.sh。
+patch_targets_exist() {
+	local patch_file="$1"
+	local target_path
+
+	while IFS= read -r target_path; do
+		[ -n "$target_path" ] || continue
+		if [ ! -e "$target_path" ]; then
+			echo "  -> skip: $target_path not found in this tree"
+			return 1
+		fi
+	done < <(awk '
+		/^--- / { src = $2 }
+		/^\+\+\+ / {
+			dst = $2
+			if (src != "/dev/null" && dst != "/dev/null" && dst != "") {
+				sub(/^[ab]\//, "", dst)
+				print dst
+			}
+		}
+	' "$patch_file")
+
+	return 0
+}
+
+function apply_openwrt_patch_dir() {
+	local patch_dir="$1"
+	local patch_file
+	local -a patch_files
+
+	if [ ! -d "$patch_dir" ]; then
+		echo "No $patch_dir directory, skipping"
+		return 0
+	fi
+
+	shopt -s nullglob
+	patch_files=("$patch_dir"/*.patch)
+	shopt -u nullglob
+	for patch_file in "${patch_files[@]}"; do
+		echo "Applying $patch_file"
+		patch_targets_exist "$patch_file" || continue
+		patch -p1 --no-backup-if-mismatch --quiet < "$patch_file" || return 1
 	done
+}
+
+function patch_openwrt_core() {
+	apply_openwrt_patch_dir mypatch-core
 }
 
 function patch_openwrt_custom() {
-	for i2 in $( ls mypatch-custom ); do
-		echo Applying mypatch-custom $i2
-		patch -p1 --no-backup-if-mismatch --quiet < mypatch-custom/$i2
-	done
+	apply_openwrt_patch_dir mypatch-custom
 }
 
 function patch_openwrt_core_pre() {
-	cd openwrt
-	patch_openwrt_core
-	patch_openwrt_custom
-	# SFE 的内核补丁/config 由 add_openwrt_sfe_ipt_k66 / add_openwrt_sfe_nft_k66 负责，
-	# 这里不再追加 config-6.12/mediatek 的 24.10 遗留处理。
+	cd openwrt || return 1
+	patch_openwrt_core || return 1
+	patch_openwrt_custom || return 1
 	cd ../
 }
 
@@ -421,8 +508,27 @@ echo "$(cat package-configs/$OpenWrt_PATCH_FILE_DIR/$Target_CFG_Machine-nftables
 }
 
 function add_machine_package_config() {
-echo "$(cat machine-configs/$OpenWrt_PATCH_FILE_DIR/$Target_CFG_Machine-$Matrix_Target.config)" >> openwrt/.config
-echo "$(cat package-configs/$OpenWrt_PATCH_FILE_DIR/$Target_CFG_Machine-$Matrix_Target.config)" >> openwrt/.config
+	local config_name="${Target_CFG_Machine}-${Matrix_Target}.config"
+	local machine_config="machine-configs/$OpenWrt_PATCH_FILE_DIR/$config_name"
+	local package_config="package-configs/$OpenWrt_PATCH_FILE_DIR/$config_name"
+
+	if [ ! -s "$machine_config" ]; then
+		echo "::error ::Missing machine config: $machine_config"
+		return 1
+	fi
+	if [ ! -s "$package_config" ]; then
+		echo "::error ::Missing package config: $package_config"
+		return 1
+	fi
+
+	cat "$machine_config" "$package_config" >> openwrt/.config
+	# iptables 机型要 fw3（firewall + iptables/legacy），不要默认的 fw4/nftables（同 AP-action-IPQ）
+	if [[ "$Matrix_Target" == *-iptables ]]; then
+		cat >> openwrt/.config <<'EOF'
+CONFIG_PACKAGE_firewall=y
+# CONFIG_PACKAGE_firewall4 is not set
+EOF
+	fi
 }
 
 function patch_openwrt_feeds() {
@@ -661,13 +767,10 @@ init_openwrt_patch_common
 elif [ "$1" == "ln-openwrt" ]; then
 ln_openwrt
 elif [ "$1" == "add-openwrt-sfe-2512-rk" ]; then
-add_openwrt_sfe_ipt_k66
-add_openwrt_sfe_nft_k66
-add_openwrt_sfe_kmods
+add_openwrt_sfe_66_2512
 elif [ "$1" == "add-openwrt-files-2512-rk" ]; then
 add_openwrt_files
 patch_openwrt_core_pre
-add_openwrt_sfe_patch_fix_66
 elif [ "$1" == "add-openwrt-kmods" ]; then
 add_openwrt_kmods
 elif [ "$1" == "fix-openwrt-feeds" ]; then

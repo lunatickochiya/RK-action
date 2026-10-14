@@ -1,7 +1,7 @@
-From 7451383769e209125260860a46d633007baa959b Mon Sep 17 00:00:00 2001
+From f0aea969aca237bd41942235953fca91d7a7533e Mon Sep 17 00:00:00 2001
 From: lunatickochiya <125438787@qq.com>
-Date: Sun, 26 Jan 2025 18:03:12 +0800
-Subject: [PATCH 2/5] luci-app-firewall:add fullcone
+Date: Sat, 15 Aug 2026 08:35:32 +0800
+Subject: [PATCH 3/7] luci-app-firewall:add fullcone
 
 ---
  .../resources/view/firewall/zones.js           |  5 +++++
@@ -9,10 +9,10 @@ Subject: [PATCH 2/5] luci-app-firewall:add fullcone
  2 files changed, 23 insertions(+)
 
 diff --git a/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js b/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js
-index 47b31cf..efa2fe8 100644
+index 129d290..c00c667 100644
 --- a/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js
 +++ b/applications/luci-app-firewall/htdocs/luci-static/resources/view/firewall/zones.js
-@@ -58,6 +58,11 @@ return view.extend({
+@@ -56,6 +56,11 @@ return view.extend({
  
  		o = s.option(form.Flag, 'drop_invalid', _('Drop invalid packets'));
  
@@ -21,15 +21,15 @@ index 47b31cf..efa2fe8 100644
 +		o.value('1', _('Compatible Mode'));
 +		o.value('2', _('High Performing Mode'));
 +
- 		var p = [
+ 		let p = [
  			s.option(form.ListValue, 'input', _('Input')),
  			s.option(form.ListValue, 'output', _('Output')),
 diff --git a/applications/luci-app-firewall/po/zh_Hans/firewall.po b/applications/luci-app-firewall/po/zh_Hans/firewall.po
-index f1656ae..df82404 100644
+index 192dd03..76d4430 100644
 --- a/applications/luci-app-firewall/po/zh_Hans/firewall.po
 +++ b/applications/luci-app-firewall/po/zh_Hans/firewall.po
-@@ -1532,3 +1532,21 @@ msgstr "最多 65536 个条目。"
- #: applications/luci-app-firewall/htdocs/luci-static/resources/tools/firewall.js:339
+@@ -1541,3 +1541,21 @@ msgstr "最多 65536 个条目。"
+ #: applications/luci-app-firewall/htdocs/luci-static/resources/tools/firewall.js:338
  msgid "valid firewall mark"
  msgstr "有效的防火墙标记"
 +
@@ -51,5 +51,5 @@ index f1656ae..df82404 100644
 +msgid "High Performing Mode"
 +msgstr "高性能模式"
 -- 
-2.34.1
+2.55.0
 

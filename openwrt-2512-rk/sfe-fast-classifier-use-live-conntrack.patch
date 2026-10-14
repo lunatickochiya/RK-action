@@ -21,7 +21,7 @@ The entry is looked up with the 5-tuple of the packet being processed, so
 use that packet's (referenced) conntrack instead of the cached snapshot.
 
 Ported from AP-action-IPQ 7337ea2 / efba8ce.
-Applied by core.sh apply_sfe_live_conntrack_fix (add-openwrt-sfe-2410).
+Applied by core.sh add-openwrt-sfe-2512-rk (add_openwrt_sfe_66_2512).
 --- a/shortcut-fe/fast-classifier/src/fast-classifier.c
 +++ b/shortcut-fe/fast-classifier/src/fast-classifier.c
 @@ -1061,7 +1061,14 @@

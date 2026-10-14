@@ -92,6 +92,7 @@ jobs:
       Matrix_Target: ${{ matrix.target }}
       Target_CFG_Machine: ${{github.event.inputs.MACH}}
       OpenWrt_PATCH_FILE_DIR: openwrt-2512-rk
+      SFE_INPUT_STATUS: ${{ github.event.inputs.SFE_BUILDIN || 'true' }}
 
     steps:
     - name: 检查
@@ -176,7 +177,7 @@ jobs:
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: 添加 SFE
-      if: github.event.inputs.SFE_BUILDIN == 'true'
+      if: env.SFE_INPUT_STATUS == 'true'
       id: sfe
       run: |
         $GITHUB_WORKSPACE/core.sh add-openwrt-sfe-2512-rk
@@ -186,8 +187,6 @@ jobs:
     - name: 自定义安装包(优先于feeds)
       if: steps.clone.outputs.status == 'success'
       id: files
-      env:
-        SFE_INPUT_STATUS: ${{ github.event.inputs.SFE_BUILDIN }}
       run: |
         $GITHUB_WORKSPACE/core.sh add-openwrt-files-2512-rk
         echo "status=success" >> $GITHUB_OUTPUT
@@ -207,9 +206,12 @@ jobs:
       run: |
         cd openwrt
         ./scripts/feeds update -a
-        grep -q -- '--ci false \\' feeds/packages/lang/rust/Makefile || sed -i '/x\.py \\/a \        --ci false \\' feeds/packages/lang/rust/Makefile
+        (cp -r $GITHUB_WORKSPACE/$OpenWrt_PATCH_FILE_DIR/feeds-replace/luci/* feeds/luci/ && echo "luci-lib-docker Re-add")
+        rm -rf feeds/luci.index
+        (rm -rf feeds/packages/lang/golang && cp -r $GITHUB_WORKSPACE/$OpenWrt_PATCH_FILE_DIR/feeds-packages-replace/* feeds/packages/ && echo "Golang Replaced")
         rm -rf feeds/packages.index
-        ./scripts/feeds update packages
+        grep -q -- '--ci false \\' feeds/packages/lang/rust/Makefile || sed -i '/x\.py \\/a \        --ci false \\' feeds/packages/lang/rust/Makefile
+        ./scripts/feeds update luci packages
         ./scripts/feeds install -a
         echo "status=success" >> $GITHUB_OUTPUT
 

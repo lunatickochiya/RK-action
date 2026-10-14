@@ -1,7 +1,7 @@
-From a0863ec211f2675ec6f4003fc482d91902b4c399 Mon Sep 17 00:00:00 2001
+From 00bca7d6061361ccdc50e78e1e66acf7fcd5deb0 Mon Sep 17 00:00:00 2001
 From: lunatickochiya <125438787@qq.com>
-Date: Tue, 11 Feb 2025 17:46:30 +0800
-Subject: [PATCH 5/5] luci-app-upnp:add force directing
+Date: Sat, 15 Aug 2026 08:36:32 +0800
+Subject: [PATCH 4/7] luci-app-upnp:add force directing
 
 ---
  .../htdocs/luci-static/resources/view/upnp/upnp.js          | 3 +++
@@ -10,7 +10,7 @@ Subject: [PATCH 5/5] luci-app-upnp:add force directing
  3 files changed, 10 insertions(+), 1 deletion(-)
 
 diff --git a/applications/luci-app-upnp/htdocs/luci-static/resources/view/upnp/upnp.js b/applications/luci-app-upnp/htdocs/luci-static/resources/view/upnp/upnp.js
-index 4657113..23d2661 100644
+index 04c870a..2133d2f 100644
 --- a/applications/luci-app-upnp/htdocs/luci-static/resources/view/upnp/upnp.js
 +++ b/applications/luci-app-upnp/htdocs/luci-static/resources/view/upnp/upnp.js
 @@ -212,6 +212,9 @@ return view.extend({
@@ -24,10 +24,10 @@ index 4657113..23d2661 100644
  			_('ACL specify which client addresses and ports can be mapped, IPv6 always allowed.'));
  		s.sortable = true;
 diff --git a/applications/luci-app-upnp/po/zh_Hans/upnp.po b/applications/luci-app-upnp/po/zh_Hans/upnp.po
-index af63871..5ff48d3 100644
+index 2191162..3c3789c 100644
 --- a/applications/luci-app-upnp/po/zh_Hans/upnp.po
 +++ b/applications/luci-app-upnp/po/zh_Hans/upnp.po
-@@ -258,3 +258,9 @@ msgstr "上传速度"
+@@ -261,3 +261,9 @@ msgstr "上行带宽"
  msgctxt "Use %s (%s = STUN)"
  msgid "Use %s"
  msgstr "使用 %s"
@@ -51,5 +51,5 @@ index f72b57b..18feb21 100644
  					if (m) {
  						push(rules, {
 -- 
-2.34.1
+2.55.0
 

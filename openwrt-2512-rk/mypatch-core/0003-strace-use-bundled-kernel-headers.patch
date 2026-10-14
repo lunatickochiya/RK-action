@@ -1,6 +1,6 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: lunatickochiya <125438787@qq.com>
-Date: Sat, 3 Oct 2026 22:00:00 +0800
+From e7873c4d7ee771b1f975986cf81ecf31d692580f Mon Sep 17 00:00:00 2001
+From: Jonas Gorski <jonas.gorski@gmail.com>
+Date: Wed, 14 Jan 2026 10:30:55 +0100
 Subject: [PATCH] strace: use bundled kernel headers
 
 Build against the bundled kernel headers instead of using the current
@@ -8,8 +8,17 @@ kernel ones. This ensures strace is using the kernel headers it is
 written against, and not a random one that may contain breaking uapi
 changes (which happen from time to time).
 
-Backport of upstream OpenWrt commit e7873c4d ("strace: use bundled
-kernel headers") for strace 6.12 (openwrt-24.10 based trees).
+Fixes build against 6.18 final and recent LTS/stable kernels that got
+minor uapi breakages (rename of a 6.18 introduced #define and a struct
+field).
+
+The PON kernel 6.18.52 user headers changed struct io_uring_buf_reg to
+add "min_left" and turn "resv" into __u32[5], which breaks strace 6.17's
+CHECK_TYPE_SIZE(arg.resv, sizeof(uint64_t) * 3) static assertion:
+
+  io_uring.c: error: static assertion failed:
+  "Unexpected size of arg.resv (sizeof(uint64_t) * 3 expected).
+   --enabled-bundled=yes configure option may be used to work around that."
 
 Signed-off-by: lunatickochiya <125438787@qq.com>
 
@@ -18,7 +27,7 @@ Signed-off-by: lunatickochiya <125438787@qq.com>
 @@ -10,7 +10,7 @@
  
  PKG_NAME:=strace
- PKG_VERSION:=6.12
+ PKG_VERSION:=6.17
 -PKG_RELEASE:=1
 +PKG_RELEASE:=2
  

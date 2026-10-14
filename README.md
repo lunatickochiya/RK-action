@@ -67,21 +67,38 @@ machine-configs/openwrt-2512-rk/   # 设备选择（TARGET_DEVICE、testing kern
 package-configs/openwrt-2512-rk/   # 软件包集合（含 ztl-lite 精简版）
 package-configs/kmod_exclude_list_kernel66.config  # 6.6 内核下需要排除的 kmod
 package/kochiya/           # 本地软件包（autoset 等），构建时拷贝进源码树
-openwrt-2512-rk/           # 需要套在源码树上的补丁/资源
+openwrt-2512-rk/           # 需要套在源码树上的补丁/资源（补丁取自 AP-action-IPQ 的 openwrt-2512-ipq，已适配 25.12）
   bcmfullcone/             # 全锥 NAT（hack-6.6/6.12 + firewall + iptables）
-  mypatch-bbr-v3/          # BBR v3
-  mypatch-core/            # 基础补丁（ccache liblzo、strace、opkg curl 等）
+  mypatch-core/            # 通用补丁（ccache liblzo、strace 等；构建时会并入 BBR v3）
+  mypatch-core-66/         # 6.6 内核专用补丁（mypatch-bbr-v3，TRY_BBR_V3=1 时拷进 mypatch-core）
   mypatch-custom-rockchip-{iptables,nftables}/  # rockchip 定制（fullcone 目标、dnsmasq 默认值）
+  feeds-packages-replace/  # feeds/packages 替换（golang 默认 1.27）
+  feeds-replace/           # feeds/luci 回填（luci-lib-docker collection）
   feeds-packages-patch/ feeds-luci-patch/ feeds-telephony-patch/ lunatic7-revert/
   sfe-fast-classifier-use-live-conntrack.patch  # SFE conntrack 悬垂指针修复
 ```
 
+## 补丁来源
+
+`openwrt-2512-rk/` 的补丁集移植自 AP-action-IPQ 的 `openwrt-2512-ipq`（该仓库上跑通了 25.12 构建）：
+
+- `feeds-luci-patch` / `feeds-packages-patch`：25.12 feeds 适配版（含 luci 25.10 适配、tailscale 1.102.3、sstp-client、ffmpeg、miniupnp 修复等）
+- `feeds-packages-replace`（golang，`GO_DEFAULT_VERSION:=1.27`）与 `feeds-replace`（luci-lib-docker collection）
+  在 feeds 更新后整目录替换/回填，见工作流的 "更新 & 安装 feeds"
+- `mypatch-core` 只保留与平台无关的补丁（ccache liblzo、strace）；IPQ 板级补丁和 24.10 专用补丁未移植
+- `mypatch-core-66/mypatch-bbr-v3`：BBR v3（6.6），`TRY_BBR_V3=1` 时在构建期并入 `mypatch-core`
+- rockchip 专用目录保留：`bcmfullcone`、`mypatch-custom-rockchip-*`、`package-for-openwrt-2512-rk`
+- SFE/TurboACC 用固定的 turboacc commit 取包（不再跟随浮动分支），nftables 机型同时替换
+  firewall4/nftables/libnftnl
+
 ## 已知事项
 
 - 25.12 使用 apk 作为包管理器，产物为 `.apk`，`after_build.sh` 打包逻辑不变。
-- `feeds-packages-patch` / `feeds-luci-patch` 里的补丁来自 24.10，个别 hunk 在 25.12 feeds 上可能失败
-  （`patch` 失败不中断构建），首次构建后按日志修订。
-- golang 不再整目录替换：25.12 的 packages feed 自带 `golang` / `golang1.26` / `golang1.27`。
+- `feeds-packages-patch` / `feeds-luci-patch` 用的是 AP-action-IPQ 的 25.12 适配补丁，个别 hunk 仍可能失败
+  （`patch` 失败不中断构建），按构建日志修订。
+- golang 由 `feeds-packages-replace` 整目录替换（默认 1.27）；luci-lib-docker collection 由 `feeds-replace` 回填。
+- `mypatch-core` / `mypatch-custom` 的补丁应用会检查目标文件是否存在（`patch_targets_exist`），
+  不适合本树的补丁自动跳过；正常补丁失败会终止构建（同 AP-action-IPQ）。
 - `ztl-lite` 的软件包集合由 `ztl-joyrock` 的配置按 `tpm312_lite` 的裁剪思路生成
   （去掉 `luci-app-openclash`/`passwall`/`ssr-plus`、aria2/amule/rclone/nvr 等下载媒体包、
   samba4/filebrowser/diskman 等共享包、statistics/mosdns/smartdns 等监控服务、多余主题），
