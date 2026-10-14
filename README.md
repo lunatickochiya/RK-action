@@ -65,7 +65,7 @@ refineconfig.sh            # 构建后配置微调（DIY_SH_RFC）
 env/openwrt-2512-rk.repo   # 源码仓库地址/分支/DIY 脚本名（REPO_URL 需要 token）
 machine-configs/openwrt-2512-rk/   # 设备选择（TARGET_DEVICE、testing kernel）
 package-configs/openwrt-2512-rk/   # 软件包集合（含 ztl-lite 精简版）
-package-configs/kmod_exclude_list_kernel66.config  # 6.6 内核下需要排除的 kmod
+package-configs/kmod_exclude_list_6_12.config  # kmod 全量编译排除表（同 AP-action-IPQ 的 6.12/6.6 列表）
 package/kochiya/           # 本地软件包（autoset 等），构建时拷贝进源码树
 openwrt-2512-rk/           # 需要套在源码树上的补丁/资源（补丁取自 AP-action-IPQ 的 openwrt-2512-ipq，已适配 25.12）
   bcmfullcone/             # 全锥 NAT（hack-6.6/6.12 + firewall + iptables）
@@ -99,9 +99,9 @@ openwrt-2512-rk/           # 需要套在源码树上的补丁/资源（补丁�
 - golang 由 `feeds-packages-replace` 整目录替换（默认 1.27）；luci-lib-docker collection 由 `feeds-replace` 回填。
 - `mypatch-core` / `mypatch-custom` 的补丁应用会检查目标文件是否存在（`patch_targets_exist`），
   不适合本树的补丁自动跳过；正常补丁失败会终止构建（同 AP-action-IPQ）。
-- kmod 全量编译（`ALLKMOD=1`）用的排除表 `kmod_exclude_list_kernel66.config` 对齐 AP-action-IPQ 的
+- kmod 全量编译（`ALLKMOD=1`）用的排除表 `kmod_exclude_list_6_12.config` 直接对齐 AP-action-IPQ 的
   6.12/6.6 列表（`kmod-qmi_wwan_s`、`kmod-usb-serial-xr_usb_serial_common`、`kmod-openvswitch*`、
-  `kmod-ipt-rtpengine`、`kmod-ath12k` 等 lunatic7 feed 里在 25.12 上编不过的 kmod），另加本仓库的
+  `kmod-ipt-rtpengine`、`kmod-ath12k` 等 lunatic7 feed 里在 25.12 上编不过的 kmod），末尾另加本仓库的
   `kmod-pf-ring` / `kmod-mdio-netlink`。新机型如果还有编不过的 kmod，追加到这个文件即可。
 - 下载阶段 `make download` 允许失败（`|| true`）：ATF 等包的 mirror-hash 校验在 CI 上会失败，
   构建时会用 git 回退取源码；同时 build matrix 关闭 fail-fast，两个 target 互不影响。

@@ -670,8 +670,10 @@ fix_openwrt_config_eror
 }
 
 function add_all_kmod_config() {
-# rockchip 25.12 固定使用 6.6 测试内核，排除列表用 kmod_exclude_list_kernel66.config
-KMOD_Compile_Exclude_List_Route=package-configs/kmod_exclude_list_kernel66.config
+# 25.12 固定用 6.6 测试内核（machine-config 里 CONFIG_TESTING_KERNEL=y），
+# kmod 排除表沿用 AP-action-IPQ 的 6.12/6.6 列表（package-configs/kmod_exclude_list_6_12.config）：
+# lunatic7 feed 里在 25.12 上编不过的 kmod（qmi_wwan_s、openvswitch*、xr_usb_serial_common 等）
+KMOD_Compile_Exclude_List_Route=package-configs/kmod_exclude_list_6_12.config
 echo "The exclude List route is $KMOD_Compile_Exclude_List_Route"
 all_kmod_config_core
 }
