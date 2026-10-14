@@ -86,6 +86,7 @@ jobs:
     needs: prepare
     timeout-minutes: 720
     strategy:
+      fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     name: Build ${{github.event.inputs.MACH}} openwrt 25.12 ${{ matrix.target }}
     env:
@@ -262,7 +263,9 @@ jobs:
       if: steps.config.outputs.status == 'success'
       run: |
         cd openwrt
-        make download -j$(nproc)
+        # 个别包（如 arm-trusted-firmware-rockchip-vendor 的 mirror hash 校验）下载阶段会报错，
+        # 但构建时会用 git 回退拿到源码，这里不让下载阶段的失败阻断构建。
+        make download -j$(nproc) || true
         find dl -size -1024c -exec rm -f {} \;
 
     - name: 缓存staging

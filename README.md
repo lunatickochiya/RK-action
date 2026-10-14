@@ -99,6 +99,12 @@ openwrt-2512-rk/           # 需要套在源码树上的补丁/资源（补丁�
 - golang 由 `feeds-packages-replace` 整目录替换（默认 1.27）；luci-lib-docker collection 由 `feeds-replace` 回填。
 - `mypatch-core` / `mypatch-custom` 的补丁应用会检查目标文件是否存在（`patch_targets_exist`），
   不适合本树的补丁自动跳过；正常补丁失败会终止构建（同 AP-action-IPQ）。
+- kmod 全量编译（`ALLKMOD=1`）用的排除表 `kmod_exclude_list_kernel66.config` 对齐 AP-action-IPQ 的
+  6.12/6.6 列表（`kmod-qmi_wwan_s`、`kmod-usb-serial-xr_usb_serial_common`、`kmod-openvswitch*`、
+  `kmod-ipt-rtpengine`、`kmod-ath12k` 等 lunatic7 feed 里在 25.12 上编不过的 kmod），另加本仓库的
+  `kmod-pf-ring` / `kmod-mdio-netlink`。新机型如果还有编不过的 kmod，追加到这个文件即可。
+- 下载阶段 `make download` 允许失败（`|| true`）：ATF 等包的 mirror-hash 校验在 CI 上会失败，
+  构建时会用 git 回退取源码；同时 build matrix 关闭 fail-fast，两个 target 互不影响。
 - `ztl-lite` 的软件包集合由 `ztl-joyrock` 的配置按 `tpm312_lite` 的裁剪思路生成
   （去掉 `luci-app-openclash`/`passwall`/`ssr-plus`、aria2/amule/rclone/nvr 等下载媒体包、
   samba4/filebrowser/diskman 等共享包、statistics/mosdns/smartdns 等监控服务、多余主题），
