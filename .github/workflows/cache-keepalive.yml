@@ -1,0 +1,76 @@
+name: Keep Cache Alive
+
+# actions/cache 的条目 7 天不访问会被回收。
+# cachewrtbuild 生成的缓存 key 形如：
+#   <mixkey>-cache-openwrt-<toolchain-hash>-<timestamp>
+# 每 5 天用 lookup-only（只查询不下载）触碰一次各 mixkey 的最近缓存，
+# 保证 25.12 rockchip 的工具链/ccache 缓存不被回收、不用每次重编工具链。
+on:
+  schedule:
+    - cron: '0 0 */5 * *'
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      # ---- 25.12 rockchip（build-rockchip-2512，含 eBPF 变体）----
+      - name: Touch rockchip-iptables
+        id: rk-ipt
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            staging_dir/host*
+            staging_dir/tool*
+            .ccache
+          key: rockchip-iptables-cache-openwrt-
+          restore-keys: rockchip-iptables-cache-openwrt-
+          lookup-only: true
+
+      - name: Touch rockchip-nftables
+        id: rk-nft
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            staging_dir/host*
+            staging_dir/tool*
+            .ccache
+          key: rockchip-nftables-cache-openwrt-
+          restore-keys: rockchip-nftables-cache-openwrt-
+          lookup-only: true
+
+      - name: Touch rockchip-iptables_eBPF
+        id: rk-ipt-ebpf
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            staging_dir/host*
+            staging_dir/tool*
+            .ccache
+          key: rockchip-iptables_eBPF-cache-openwrt-
+          restore-keys: rockchip-iptables_eBPF-cache-openwrt-
+          lookup-only: true
+
+      - name: Touch rockchip-nftables_eBPF
+        id: rk-nft-ebpf
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            staging_dir/host*
+            staging_dir/tool*
+            .ccache
+          key: rockchip-nftables_eBPF-cache-openwrt-
+          restore-keys: rockchip-nftables_eBPF-cache-openwrt-
+          lookup-only: true
+
+      - name: Summary
+        run: |
+          echo "matched cache keys:"
+          echo "  rockchip-iptables       : ${{ steps.rk-ipt.outputs.cache-matched-key }}"
+          echo "  rockchip-nftables       : ${{ steps.rk-nft.outputs.cache-matched-key }}"
+          echo "  rockchip-iptables_eBPF  : ${{ steps.rk-ipt-ebpf.outputs.cache-matched-key }}"
+          echo "  rockchip-nftables_eBPF  : ${{ steps.rk-nft-ebpf.outputs.cache-matched-key }}"

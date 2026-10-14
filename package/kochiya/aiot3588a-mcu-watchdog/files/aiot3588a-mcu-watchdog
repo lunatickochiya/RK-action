@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+mcu_id=$(i2ctransfer -y 6 w1@0x62 0x3a r1)
+if [ "$mcu_id" != "0x89" ]; then
+	printf 'Unexpected MCU identifier: %s\n' "$mcu_id" >&2
+	exit 1
+fi
+
+i2ctransfer -y 6 w2@0x62 0x32 0x00
+i2ctransfer -y 6 w2@0x62 0x32 0x01
+i2ctransfer -y 6 w2@0x62 0x51 0x33
+
+while :; do
+	i2ctransfer -y 6 w2@0x62 0x33 0xab
+	sleep 20
+done
