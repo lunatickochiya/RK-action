@@ -66,10 +66,13 @@
 | `TEST_KERNEL` | 使用 6.6 测试内核（默认 `1`，machine-config 里已写死，这里是幂等兜底） |
 | `BCM_FULLCONE` | 全锥形 NAT（iptables/nftables 各一套补丁） |
 | `TRY_BBR_V3` | TCP BBR v3（`target/linux/generic/hack-6.6`） |
-| `DOCKER_BUILDIN` | 在全部 package-config 里追加 docker 组件 |
 | `ADD_IB` / `ADD_SDK` / `ADD_ROOTFS` | 追加 ImageBuilder / SDK / rootfs tar 产物 |
 | `Firewall_Allow_WAN` | WAN 侧 input 放行 |
 | `ADD_eBPF` | eBPF/dae 相关配置 |
+
+> docker 组件（`dockerd` + `luci-app-dockerman` + `DOCKER_*` 选项）已经写进
+> `package-configs/openwrt-2512-rk/*.config` 的所有机型里，构建默认带 docker，
+> 不再需要运行时选项。
 
 `config_repo`（JSON）：`Cache`、`CacheSave`、`UPLOAD_RELEASE`、`ALLKMOD`。
 

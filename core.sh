@@ -44,7 +44,6 @@ function patch_json_input_set() {
 	echo -e "BCM_FULLCONE=$(echo $PATCH_JSON_INPUT | jq -r ".BCM_FULLCONE")" >> "$GITHUB_ENV"
 	echo -e "TRY_BBR_V3=$(echo $PATCH_JSON_INPUT | jq -r ".TRY_BBR_V3")" >> "$GITHUB_ENV"
 	echo -e "Firewall_Allow_WAN=$(echo $PATCH_JSON_INPUT | jq -r ".Firewall_Allow_WAN")" >> "$GITHUB_ENV"
-	echo -e "DOCKER_BUILDIN=$(echo $PATCH_JSON_INPUT | jq -r ".DOCKER_BUILDIN")" >> "$GITHUB_ENV"
 	echo -e "ADD_IB=$(echo $PATCH_JSON_INPUT | jq -r ".ADD_IB")" >> "$GITHUB_ENV"
 	echo -e "ADD_SDK=$(echo $PATCH_JSON_INPUT | jq -r ".ADD_SDK")" >> "$GITHUB_ENV"
 }
@@ -132,26 +131,8 @@ function init_openwrt_patch_common() {
 		echo "BCM_FULLCONE_NAME=_BCM_FULLCONE" >> $GITHUB_ENV
 	fi
 
-	if [ "$DOCKER_BUILDIN" = "1" ]; then
-		for file0 in package-configs/$OpenWrt_PATCH_FILE_DIR/*.config; do     echo "# docker组件
-CONFIG_PACKAGE_dockerd=y
-CONFIG_PACKAGE_docker-compose=y
-CONFIG_DOCKER_CHECK_CONFIG=y
-CONFIG_DOCKER_CGROUP_OPTIONS=y
-CONFIG_DOCKER_OPTIONAL_FEATURES=y
-CONFIG_DOCKER_NET_OVERLAY=y
-CONFIG_DOCKER_NET_ENCRYPT=y
-CONFIG_DOCKER_NET_MACVLAN=y
-CONFIG_DOCKER_NET_TFTP=y
-CONFIG_DOCKER_STO_DEVMAPPER=y
-CONFIG_DOCKER_STO_EXT4=y
-CONFIG_DOCKER_STO_BTRFS=y
-# end
-CONFIG_PACKAGE_luci-app-dockerman=y
-" >> "$file0"; done
-		echo "----$Matrix_Target-----Docker--Config--Added--"
-		echo "DOCKER_NAME=_DOCKER" >> $GITHUB_ENV
-	fi
+	# docker 组件已经写进所有机型的 package-configs/openwrt-2512-rk/*.config（dockerd +
+	# luci-app-dockerman + DOCKER_* 选项），不再用 DOCKER_BUILDIN 运行时追加。
 
 	if [ "$ADD_SDK" = "1" ]; then
 		for file1 in package-configs/$OpenWrt_PATCH_FILE_DIR/*.config; do     echo "# ADD SDK
