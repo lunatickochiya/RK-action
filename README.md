@@ -103,6 +103,10 @@ openwrt-2512-rk/           # 需要套在源码树上的补丁/资源（补丁�
   （不使用 IPQ 的 6.12 列表文件；但参考 IPQ 补入了 lunatic7 feed 里在 25.12 上编不过的
   `kmod-qmi_wwan_s`、`kmod-usb-serial-xr_usb_serial_common`、`kmod-openvswitch*`、
   `kmod-ipt-rtpengine`、`kmod-ath12k`）。新机型如果还有编不过的 kmod，追加到这个文件即可。
+- `kmod-ath11k*` / `kmod-ath12k` 在 6.6 内核下编不过：源码树里的 mac80211 是 backports 6.18.55，
+  其 ath11k/ath12k 用了内核 6.12 才有的 `kzalloc_objs()`（backports 里没有兼容 shim）。
+  rockchip 板子用不到这两个驱动，已在排除表里禁用；如果以后源码树换回 backports 6.18.39
+  或换到 6.12 内核，可以从排除表里去掉。
 - 下载阶段 `make download` 允许失败（`|| true`）：ATF 等包的 mirror-hash 校验在 CI 上会失败，
   构建时会用 git 回退取源码；同时 build matrix 关闭 fail-fast，两个 target 互不影响。
 - `ztl-lite` 的软件包集合由 `ztl-joyrock` 的配置按 `tpm312_lite` 的裁剪思路生成
