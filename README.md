@@ -21,27 +21,23 @@
 ## 工作流
 
 - `build-rockchip-2512.yml`：25.12 机型构建（iptables / nftables 各一份）
-- `cache-keepalive.yml`：每 5 天触碰一次缓存 key，避免被回收
+- `build-caches.yml`：**预编并保存 tools/toolchain 缓存**（参考 autoset 的 `archive/Build-Caches.yml`）
+  - clone/配置流程与固件构建完全一致，然后
+    `make tools/compile` → `make toolchain/compile`
+    （`CacheLinux=1` 再编内核、`CachePKGS=1` 再编 `package/libs/toolchain` 与 `mac80211`，主要是预热 `.ccache`）；
+  - `HiGarfield/cachewrtbuild` 的 post 步骤把 `staging_dir/host*`、`staging_dir/tool*`、`.ccache`
+    存成 `<mixkey>-cache-openwrt-<工具链hash>`（mixkey = `rockchip-iptables` / `rockchip-nftables`，
+    与固件构建相同 → 固件构建会自动命中并跳过工具链编译）；
+  - 想给某个 target 预热/刷新缓存时手动跑一次即可（key 含工具链 hash，
+    源码树里 `tools/`/`toolchain/` 有改动后需要重跑）。
+- `cache-keepalive.yml`：每 5 天触碰一次上面的缓存 key，避免被回收
 - `secret-check.yml`：验证 `MY_SECRET_TOKEN` 能否克隆私有源码仓库
 
 在 Actions 页面选择 `Build Rockchip 25.12`，点击 `Run workflow`，再选择机型与构建参数。
 
-## 缓存（tools / toolchain / ccache）
-
-`build-rockchip-2512.yml` 用 `HiGarfield/cachewrtbuild`（`mixkey = rockchip-iptables / rockchip-nftables`）
-缓存 `staging_dir/host*`（tools）、`staging_dir/tool*`（toolchain）与 `.ccache`：
-
-- **命中时**：直接复用工具链、跳过 tools/toolchain 编译（cachewrtbuild 的 `skip` 默认 true）；
-- **保存**：在 job 结束时由 cachewrtbuild 的 post 步骤完成（`post-if: success()`，即只有 job 成功才保存）；
-  `config_repo` 里的 `CacheSave` 默认 `"false"` → 传给 `skip_saving`，也就是**会保存**；
-  设成 `"true"` 则只读不写（命名沿用 autoset 的语义）。
-- **`BUILD_CACHES=true` 选项**（workflow 输入，参考 autoset 的 `archive/Build-Caches.yml`）：
-  在编固件之前先显式跑一遍
-  `make tools/compile` → `make toolchain/compile`，
-  `config_repo` 里 `CacheLinux=1` 再编内核、`CachePKGS=1` 再编 `package/libs/toolchain` 与
-  `mac80211`（主要是预热 `.ccache`），然后继续正常编译固件。
-  想给某个 target 预热/刷新缓存时勾上它跑一次即可（缓存 key 含源码树 `tools/`/`toolchain/`
-  的 hash，这两处有改动后需要重跑）。
+> 缓存行为：`build-rockchip-2512` 的 `config_repo.CacheSave` 默认 `"false"` → **只读取不写入**；
+> 需要让固件构建自己写缓存时把它设成 `"true"`（等于 cachewrtbuild 的 `skip_saving=true`，
+> 命名沿用 autoset）。日常建议用 `build-caches.yml` 预热，固件构建保持只读。
 
 ## 支持设备
 
