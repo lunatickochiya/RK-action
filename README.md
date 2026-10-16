@@ -62,7 +62,7 @@
 | `TEST_KERNEL` | 使用 6.6 测试内核（默认 `1`，machine-config 里已写死，这里是幂等兜底） |
 | `BCM_FULLCONE` | 全锥形 NAT（iptables/nftables 各一套补丁） |
 | `TRY_BBR_V3` | TCP BBR v3（`target/linux/generic/hack-6.6`） |
-| `ADD_IB` / `ADD_SDK` / `ADD_ROOTFS` | 追加 ImageBuilder / SDK / rootfs tar 产物 |
+| `ADD_IB` / `ADD_SDK` | 追加 ImageBuilder / SDK 产物 |
 | `Firewall_Allow_WAN` | WAN 侧 input 放行 |
 | `ADD_eBPF` | eBPF/dae 相关配置 |
 

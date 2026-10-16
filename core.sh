@@ -132,7 +132,8 @@ function init_openwrt_patch_common() {
 	fi
 
 	# docker 组件已经写进所有机型的 package-configs/openwrt-2512-rk/*.config（dockerd +
-	# luci-app-dockerman + DOCKER_* 选项），不再用 DOCKER_BUILDIN 运行时追加。
+	# luci-app-dockerman + DOCKER_* 选项），不再用 DOCKER_BUILDIN 运行时追加；
+	# rootfs tar 产物（ADD_ROOTFS）选项也已移除。
 
 	if [ "$ADD_SDK" = "1" ]; then
 		for file1 in package-configs/$OpenWrt_PATCH_FILE_DIR/*.config; do     echo "# ADD SDK
@@ -147,13 +148,6 @@ CONFIG_SDK=y
 CONFIG_IB=y
 		" >> "$file2"; done
 		echo "----$Matrix_Target----IB---"
-	fi
-
-	if [ "$ADD_ROOTFS" = "1" ]; then
-		for file2 in package-configs/$OpenWrt_PATCH_FILE_DIR/*.config; do     echo "# ADD ROOTFS
-CONFIG_TARGET_ROOTFS_TARGZ=y
-		" >> "$file2"; done
-		echo "----$Matrix_Target----CONFIG_TARGET_ROOTFS_TARGZ---"
 	fi
 
 	# 25.12 主线内核是 6.12，rockchip 分支把板级支持放在 6.6（KERNEL_TESTING_PATCHVER），
@@ -442,6 +436,7 @@ function patch_openwrt_core_pre() {
 function fix_openwrt_feeds() {
 	# [ -e package-configs ] && cp -r package-configs openwrt/package-configs
 	[ -d $OpenWrt_PATCH_FILE_DIR/lunatic7-revert ] && mv -f $OpenWrt_PATCH_FILE_DIR/lunatic7-revert openwrt/feeds/lunatic7/lunatic7-revert
+	[ -d $OpenWrt_PATCH_FILE_DIR/feeds-lunatic7-patch ] && mv -f $OpenWrt_PATCH_FILE_DIR/feeds-lunatic7-patch openwrt/feeds/lunatic7/feeds-lunatic7-patch
 	[ -d $OpenWrt_PATCH_FILE_DIR/feeds-luci-patch ] && mv -f $OpenWrt_PATCH_FILE_DIR/feeds-luci-patch openwrt/feeds/luci/feeds-luci-patch
 	[ -d $OpenWrt_PATCH_FILE_DIR/feeds-packages-patch ] && mv -f $OpenWrt_PATCH_FILE_DIR/feeds-packages-patch openwrt/feeds/packages/feeds-packages-patch
 	[ -d $OpenWrt_PATCH_FILE_DIR/feeds-telephony-patch ] && mv -f $OpenWrt_PATCH_FILE_DIR/feeds-telephony-patch openwrt/feeds/telephony/feeds-telephony-patch
@@ -507,6 +502,14 @@ EOF
 }
 
 function patch_openwrt_feeds() {
+    # feeds/lunatic7 的补丁（前向补丁，修 feed 里在 25.12/6.6+GCC14 上编不过的包）
+    for lunatic7fwd in $( ls feeds/lunatic7/feeds-lunatic7-patch 2>/dev/null ); do
+        cd feeds/lunatic7/
+        echo Applying feeds-lunatic7-patch $lunatic7fwd
+        patch -p1 --no-backup-if-mismatch < feeds-lunatic7-patch/$lunatic7fwd
+        cd ../..
+    done
+
     for packagepatch in $( ls feeds/packages/feeds-packages-patch ); do
         cd feeds/packages/
         echo Applying feeds-packages-patch $packagepatch

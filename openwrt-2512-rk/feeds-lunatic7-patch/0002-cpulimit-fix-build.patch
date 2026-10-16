@@ -1,0 +1,29 @@
+--- /dev/null
++++ b/cpulimit/patches/001-fix-basename-and-man.patch
+@@ -0,0 +1,26 @@
++diff --git a/src/Makefile b/src/Makefile
++index 7b3107b..dcaa169 100644
++--- a/src/Makefile
+++++ b/src/Makefile
++@@ -19,7 +19,7 @@ ifeq ($(UNAME), FreeBSD)
++ LIBS       += -lkvm
++ endif
++ 
++-all::	$(TARGETS) $(LIBS)
+++all::	$(BIN_TARGET) $(LIBS)
++ 
++ static: $(TARGETS) $(LIBS)
++ 	$(MAKE) all CFLAGS="$(CFLAGS) --static" CC="musl-gcc"
++diff --git a/src/process_group.c b/src/process_group.c
++index 5e1efb6..d064d48 100644
++--- a/src/process_group.c
+++++ b/src/process_group.c
++@@ -25,7 +25,7 @@
++ #include <sys/time.h>
++ #include <signal.h>
++ 
++-#if defined(__APPLE__) || defined(__FREEBSD__)
+++#if defined(__APPLE__) || defined(__FREEBSD__) || defined(__linux__)
++     #include <libgen.h>
++ #endif
++ 
