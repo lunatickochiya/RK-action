@@ -287,13 +287,17 @@ jobs:
         find dl -size -1024c -exec rm -f {} \;
 
     - name: 缓存staging
-      uses: HiGarfield/cachewrtbuild@main
+      # 用 fork（lunatickochiya/cachewrtbuild@save-on-failure）：
+      # 新增 save_on_failure 选项 —— 编译失败也执行 post 保存，
+      # 这样 tools/toolchain 编完后即使后面包编译/打包失败，缓存也不会白编。
+      uses: lunatickochiya/cachewrtbuild@save-on-failure
       if: env.Cache == '1' && !cancelled()
       with:
         ccache: 'true'
         mixkey: ${{ matrix.target }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
         skip_saving: ${{ env.CacheSave }}
+        save_on_failure: 'true'
 
     - name: 检查空间使用情况
       if: (!cancelled())
