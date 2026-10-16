@@ -9,6 +9,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # post-if 读不到 action inputs，开关必须是作业级 env
+      CACHEWRT_SAVE_ON_FAILURE: 'true'
     steps:
       - name: 检查
         uses: actions/checkout@main
@@ -20,14 +23,13 @@ jobs:
           echo "save_on_failure test $(date -u +%s)" > staging_dir/toolchain-fake/file
           ls -la staging_dir/
 
-      - name: 缓存步骤（fork + save_on_failure）
+      - name: 缓存步骤（fork + CACHEWRT_SAVE_ON_FAILURE）
         uses: lunatickochiya/cachewrtbuild@save-on-failure
         with:
           ccache: 'false'
           mixkey: cacheforktest
           prefix: ${{ github.workspace }}
           skip_saving: 'false'
-          save_on_failure: 'true'
 
       - name: 故意失败（验证失败后 post 是否仍保存）
         run: |
