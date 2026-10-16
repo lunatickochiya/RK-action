@@ -25,8 +25,8 @@
   - clone/配置流程与固件构建完全一致，然后
     `make tools/compile` → `make toolchain/compile`
     （`CacheLinux=1` 再编内核、`CachePKGS=1` 再编 `package/libs/toolchain` 与 `mac80211`，主要是预热 `.ccache`）；
-  - `lunatickochiya/cachewrtbuild@save-on-failure`（fork，新增 `save_on_failure` 选项）的
-    post 步骤把 `staging_dir/host*`、`staging_dir/tool*`、`.ccache`
+  - `lunatickochiya/cachewrtbuild@save-on-failure`（fork，支持作业级 env
+    `CACHEWRT_SAVE_ON_FAILURE=true`）的 post 步骤把 `staging_dir/host*`、`staging_dir/tool*`、`.ccache`
     存成 `<mixkey>-cache-openwrt-<工具链hash>`（mixkey = `rockchip-iptables` / `rockchip-nftables`，
     与固件构建相同 → 固件构建会自动命中并跳过工具链编译）；
   - 想给某个 target 预热/刷新缓存时手动跑一次即可（key 含工具链 hash，
@@ -36,11 +36,13 @@
 
 在 Actions 页面选择 `Build Rockchip 25.12`，点击 `Run workflow`，再选择机型与构建参数。
 
-> 缓存行为：两个工作流的缓存步骤都指向 fork 的 `@save-on-failure` 分支并带
-> `save_on_failure: 'true'` —— 上游 `post-if: success()` 只在 job 成功时保存，导致
-> “tools/toolchain 编完了但后面包编译/打包失败”时缓存白编；打开该选项后失败也会保存。
-> （fork：`lunatickochiya/cachewrtbuild` 分支 `save-on-failure`，改动仅一个输入 + post-if 条件，
-> 可以随时合并回 `main` 后把工作流改回 `@main`。）
+> 缓存行为：两个工作流的缓存步骤都指向 fork 的 `@save-on-failure` 分支，并在 job env 里设置
+> `CACHEWRT_SAVE_ON_FAILURE: 'true'` —— 上游 `post-if: success()` 只在 job 成功时保存，导致
+> “tools/toolchain 编完了但后面包编译/打包失败”时缓存白编；该 env 打开后失败也会保存
+> （实测 job 失败仍执行 post 并写入缓存）。注意：`post-if` 里读不到 action 的 `with:` 输入，
+> 所以开关必须是作业级 env。
+> （fork：`lunatickochiya/cachewrtbuild` 分支 `save-on-failure`；改动只有 action.yml 的
+> post-if 条件 + save.js 一行 debug，可以随时合并回 `main` 后把工作流改回 `@main`。）
 > 另外 `config_repo.CacheSave` 语义沿用 autoset：默认 `"false"` 表示**保存**
 > （传给 action 的 `skip_saving`），设 `"true"` 则只读不写。
 

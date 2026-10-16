@@ -94,6 +94,9 @@ jobs:
       Target_CFG_Machine: ${{github.event.inputs.MACH}}
       OpenWrt_PATCH_FILE_DIR: openwrt-2512-rk
       SFE_INPUT_STATUS: ${{ github.event.inputs.SFE_BUILDIN || 'true' }}
+      # fork 的 cachewrtbuild 用这个作业级 env 驱动 post-if：
+      # 编译失败（tools/toolchain 已编完但后面包编译/打包失败）也保存缓存
+      CACHEWRT_SAVE_ON_FAILURE: 'true'
 
     steps:
     - name: 检查
@@ -287,8 +290,8 @@ jobs:
         find dl -size -1024c -exec rm -f {} \;
 
     - name: 缓存staging
-      # 用 fork（lunatickochiya/cachewrtbuild@save-on-failure）：
-      # 新增 save_on_failure 选项 —— 编译失败也执行 post 保存，
+      # fork（lunatickochiya/cachewrtbuild@save-on-failure）：靠作业级 env
+      # CACHEWRT_SAVE_ON_FAILURE=true 驱动 post-if，编译失败也执行 post 保存，
       # 这样 tools/toolchain 编完后即使后面包编译/打包失败，缓存也不会白编。
       uses: lunatickochiya/cachewrtbuild@save-on-failure
       if: env.Cache == '1' && !cancelled()
@@ -297,7 +300,6 @@ jobs:
         mixkey: ${{ matrix.target }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
         skip_saving: ${{ env.CacheSave }}
-        save_on_failure: 'true'
 
     - name: 检查空间使用情况
       if: (!cancelled())

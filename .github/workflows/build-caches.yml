@@ -2,7 +2,7 @@ name: Build Caches
 
 # 预编工具链并写入 actions/cache（参考 autoset 的 archive/Build-Caches.yml）：
 #   1) clone 源码 → 配置机器/软件包 → 可选 SFE/kmod，与 build-rockchip-2512 完全一致；
-#   2) lunatickochiya/cachewrtbuild（fork，带 save_on_failure 选项）的 post 步骤把
+#   2) lunatickochiya/cachewrtbuild（fork，支持 CACHEWRT_SAVE_ON_FAILURE）的 post 步骤把
 #      staging_dir/host*、staging_dir/tool*、.ccache
 #      存成 "<mixkey>-cache-openwrt-<工具链hash>"；
 #   3) 固件构建（build-rockchip-2512）用同一个 mixkey（matrix.target）即可命中，
@@ -96,6 +96,8 @@ jobs:
       Target_CFG_Machine: ${{github.event.inputs.MACH}}
       OpenWrt_PATCH_FILE_DIR: openwrt-2512-rk
       SFE_INPUT_STATUS: ${{ github.event.inputs.SFE_BUILDIN || 'true' }}
+      # fork 的 cachewrtbuild 用这个作业级 env 驱动 post-if：编译失败也保存缓存
+      CACHEWRT_SAVE_ON_FAILURE: 'true'
 
     steps:
     - name: 检查
@@ -247,8 +249,8 @@ jobs:
         find dl -size -1024c -exec rm -f {} \;
 
     - name: 缓存staging
-      # 用 fork（lunatickochiya/cachewrtbuild@save-on-failure）：
-      # 新增 save_on_failure 选项 —— 编译失败也执行 post 保存，
+      # fork（lunatickochiya/cachewrtbuild@save-on-failure）：靠作业级 env
+      # CACHEWRT_SAVE_ON_FAILURE=true 驱动 post-if，编译失败也执行 post 保存，
       # 这样 tools/toolchain 编完后即使后面包编译/打包失败，缓存也不会白编。
       uses: lunatickochiya/cachewrtbuild@save-on-failure
       if: env.Cache == '1' && !cancelled()
@@ -257,7 +259,6 @@ jobs:
         mixkey: ${{ matrix.target }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
         skip_saving: ${{ env.CacheSave }}
-        save_on_failure: 'true'
 
     - name: 编译Caches
       id: compile
