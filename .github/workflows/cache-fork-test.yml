@@ -1,0 +1,35 @@
+name: Cache Fork Test (temporary)
+
+# 临时工作流：验证 fork 的 save_on_failure 选项 —— job 故意失败后，
+# post 步骤是否仍然执行并把 staging_dir/host*、staging_dir/tool* 存进缓存。
+# 验证完即删除（见后续提交）。
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查
+        uses: actions/checkout@main
+
+      - name: 造假的 staging_dir（host/toolchain）
+        run: |
+          mkdir -p staging_dir/hostbin staging_dir/toolchain-fake
+          echo "save_on_failure test $(date -u +%s)" > staging_dir/hostbin/file
+          echo "save_on_failure test $(date -u +%s)" > staging_dir/toolchain-fake/file
+          ls -la staging_dir/
+
+      - name: 缓存步骤（fork + save_on_failure）
+        uses: lunatickochiya/cachewrtbuild@save-on-failure
+        with:
+          ccache: 'false'
+          mixkey: cacheforktest
+          prefix: ${{ github.workspace }}
+          skip_saving: 'false'
+          save_on_failure: 'true'
+
+      - name: 故意失败（验证失败后 post 是否仍保存）
+        run: |
+          echo "failing on purpose to test post-if"
+          exit 1
