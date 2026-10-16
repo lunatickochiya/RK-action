@@ -46,7 +46,7 @@ on:
       config_repo:
         description: 'Build/upload options (json), see README'
         required: true
-        default: '{"Cache": "1", "CacheSave": "false", "UPLOAD_RELEASE": "1", "ALLKMOD": "1"}'
+        default: '{"Cache": "1", "CacheSave": "false", "CacheSaveOnFailure": "true", "UPLOAD_RELEASE": "1", "ALLKMOD": "1"}'
 env:
   TZ: Asia/Shanghai
   OpenWrt_PATCH_FILE_DIR: openwrt-2512-rk
@@ -94,9 +94,6 @@ jobs:
       Target_CFG_Machine: ${{github.event.inputs.MACH}}
       OpenWrt_PATCH_FILE_DIR: openwrt-2512-rk
       SFE_INPUT_STATUS: ${{ github.event.inputs.SFE_BUILDIN || 'true' }}
-      # fork 的 cachewrtbuild 用这个作业级 env 驱动 post-if：
-      # 编译失败（tools/toolchain 已编完但后面包编译/打包失败）也保存缓存
-      CACHEWRT_SAVE_ON_FAILURE: 'true'
 
     steps:
     - name: 检查
@@ -290,9 +287,10 @@ jobs:
         find dl -size -1024c -exec rm -f {} \;
 
     - name: 缓存staging
-      # fork（lunatickochiya/cachewrtbuild@save-on-failure）：靠作业级 env
-      # CACHEWRT_SAVE_ON_FAILURE=true 驱动 post-if，编译失败也执行 post 保存，
-      # 这样 tools/toolchain 编完后即使后面包编译/打包失败，缓存也不会白编。
+      # fork（lunatickochiya/cachewrtbuild@save-on-failure）：config_repo 的
+      # CacheSaveOnFailure（默认 "true"）由 core.sh 导出成 env CACHEWRT_SAVE_ON_FAILURE，
+      # fork 的 post-if 读它 —— 编译失败也执行 post 保存，这样 tools/toolchain 编完后
+      # 即使后面包编译/打包失败，缓存也不会白编。
       uses: lunatickochiya/cachewrtbuild@save-on-failure
       if: env.Cache == '1' && !cancelled()
       with:

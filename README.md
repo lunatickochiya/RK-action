@@ -21,30 +21,35 @@
 ## 工作流
 
 - `build-rockchip-2512.yml`：25.12 机型构建（iptables / nftables 各一份）
-- `build-caches.yml`：**预编并保存 tools/toolchain 缓存**（参考 autoset 的 `archive/Build-Caches.yml`）
-  - clone/配置流程与固件构建完全一致，然后
-    `make tools/compile` → `make toolchain/compile`
-    （`CacheLinux=1` 再编内核、`CachePKGS=1` 再编 `package/libs/toolchain` 与 `mac80211`，主要是预热 `.ccache`）；
-  - `lunatickochiya/cachewrtbuild@save-on-failure`（fork，支持作业级 env
-    `CACHEWRT_SAVE_ON_FAILURE=true`）的 post 步骤把 `staging_dir/host*`、`staging_dir/tool*`、`.ccache`
-    存成 `<mixkey>-cache-openwrt-<工具链hash>`（mixkey = `rockchip-iptables` / `rockchip-nftables`，
-    与固件构建相同 → 固件构建会自动命中并跳过工具链编译）；
-  - 想给某个 target 预热/刷新缓存时手动跑一次即可（key 含工具链 hash，
-    源码树里 `tools/`/`toolchain/` 有改动后需要重跑）。
-- `cache-keepalive.yml`：每 5 天触碰一次上面的缓存 key，避免被回收
+- `cache-keepalive.yml`：每 5 天触碰一次缓存 key，避免被回收
 - `secret-check.yml`：验证 `MY_SECRET_TOKEN` 能否克隆私有源码仓库
 
 在 Actions 页面选择 `Build Rockchip 25.12`，点击 `Run workflow`，再选择机型与构建参数。
 
-> 缓存行为：两个工作流的缓存步骤都指向 fork 的 `@save-on-failure` 分支，并在 job env 里设置
-> `CACHEWRT_SAVE_ON_FAILURE: 'true'` —— 上游 `post-if: success()` 只在 job 成功时保存，导致
-> “tools/toolchain 编完了但后面包编译/打包失败”时缓存白编；该 env 打开后失败也会保存
-> （实测 job 失败仍执行 post 并写入缓存）。注意：`post-if` 里读不到 action 的 `with:` 输入，
-> 所以开关必须是作业级 env。
-> （fork：`lunatickochiya/cachewrtbuild` 分支 `save-on-failure`；改动只有 action.yml 的
-> post-if 条件 + save.js 一行 debug，可以随时合并回 `main` 后把工作流改回 `@main`。）
-> 另外 `config_repo.CacheSave` 语义沿用 autoset：默认 `"false"` 表示**保存**
-> （传给 action 的 `skip_saving`），设 `"true"` 则只读不写。
+## 缓存（tools / toolchain / ccache）
+
+`build-rockchip-2512.yml` 用 fork 的 `lunatickochiya/cachewrtbuild@save-on-failure` 缓存
+`staging_dir/host*`（tools）、`staging_dir/tool*`（toolchain）与 `.ccache`，
+key 为 `<mixkey>-cache-openwrt-<工具链hash>`（mixkey = `rockchip-iptables` / `rockchip-nftables`）：
+
+- **命中时**：直接复用工具链、跳过 tools/toolchain 编译（`skip` 默认 true）；
+- **保存**：在 job 结束时由 action 的 post 步骤完成；
+- 因为 key 里带源码树 `tools/`/`toolchain/` 的 hash，这两处有改动后会自然换 key（旧缓存仍可被
+  `cache-keepalive` 保住，但不会命中）。
+
+两个相关选项都在 `config_repo`（json）里，默认值：
+`{"Cache": "1", "CacheSave": "false", "CacheSaveOnFailure": "true", ...}`
+
+| 键 | 默认 | 含义 |
+|---|---|---|
+| `Cache` | `"1"` | 是否启用缓存步骤（0 则整段跳过） |
+| `CacheSave` | `"false"` | 传给 action 的 `skip_saving`：**默认 `"false"` = 保存**；设 `"true"` 则只读不写（命名沿用 autoset） |
+| `CacheSaveOnFailure` | `"true"` | `core.sh` 导出成 env `CACHEWRT_SAVE_ON_FAILURE`，fork 的 `post-if` 读它：**`"true"` 时编译失败也执行 post 保存**（避免 tools/toolchain 编完后因后续包编译/打包失败而白编）；`"false"` 恢复上游“只在 job 成功时保存”的行为 |
+
+> 注：`post-if` 里读不到 action 的 `with:` 输入，所以这个开关只能走 env
+> （`core.sh` 写 `$GITHUB_ENV` 即可，实测 job 失败仍会执行 post 并写入缓存）。
+> fork 改动仅 action.yml 的 post-if 条件 + save.js 一行 debug，可随时合并回 `main`
+> 后把工作流改回 `HiGarfield/cachewrtbuild@main`。
 
 ## 支持设备
 
@@ -77,7 +82,7 @@
 > `package-configs/openwrt-2512-rk/*.config` 的所有机型里，构建默认带 docker，
 > 不再需要运行时选项。
 
-`config_repo`（JSON）：`Cache`、`CacheSave`、`UPLOAD_RELEASE`、`ALLKMOD`。
+`config_repo`（JSON）：`Cache`、`CacheSave`、`CacheSaveOnFailure`、`UPLOAD_RELEASE`、`ALLKMOD`（详见「缓存」一节）。
 
 ## 目录结构
 

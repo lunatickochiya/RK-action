@@ -36,6 +36,9 @@ function config_json_input_set() {
 	echo -e "CacheLinux=$(echo $CONFIG_JSON_INPUT | jq -r ".CacheLinux")" >> "$GITHUB_ENV"
 	echo -e "CachePKGS=$(echo $CONFIG_JSON_INPUT | jq -r ".CachePKGS")" >> "$GITHUB_ENV"
 	echo -e "CacheSave=$(echo $CONFIG_JSON_INPUT | jq -r ".CacheSave")" >> "$GITHUB_ENV"
+	# 编译失败也保存 tools/toolchain 缓存（fork cachewrtbuild 的 post-if 读这个 env；
+	# post-if 看不到 action inputs，只能走 GITHUB_ENV / 作业级 env）
+	echo -e "CACHEWRT_SAVE_ON_FAILURE=$(echo $CONFIG_JSON_INPUT | jq -r '.CacheSaveOnFailure // "false"')" >> "$GITHUB_ENV"
 	echo -e "UPLOAD_RELEASE=$(echo $CONFIG_JSON_INPUT | jq -r ".UPLOAD_RELEASE")" >> "$GITHUB_ENV"
 	echo -e "ALLKMOD=$(echo $CONFIG_JSON_INPUT | jq -r ".ALLKMOD")" >> "$GITHUB_ENV"
 }
