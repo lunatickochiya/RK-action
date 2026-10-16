@@ -1,0 +1,34 @@
+name: Cache Fork Test (temporary)
+
+# 临时：验证 json→GITHUB_ENV 方式能否被 fork 的 post-if 看到（决定选项实现方式）
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查
+        uses: actions/checkout@main
+
+      - name: 模拟 core.sh：把选项写进 GITHUB_ENV
+        run: |
+          echo "CACHEWRT_SAVE_ON_FAILURE=true" >> "$GITHUB_ENV"
+          grep CACHEWRT_SAVE_ON_FAILURE "$GITHUB_ENV"
+
+      - name: 造假的 staging_dir（host/toolchain）
+        run: |
+          mkdir -p staging_dir/hostbin staging_dir/toolchain-fake
+          echo "gh-env test $(date -u +%s)" > staging_dir/hostbin/file
+          echo "gh-env test $(date -u +%s)" > staging_dir/toolchain-fake/file
+
+      - name: 缓存步骤（fork，开关来自 GITHUB_ENV）
+        uses: lunatickochiya/cachewrtbuild@save-on-failure
+        with:
+          ccache: 'false'
+          mixkey: cacheforktest2
+          prefix: ${{ github.workspace }}
+          skip_saving: 'false'
+
+      - name: 故意失败
+        run: exit 1
