@@ -211,12 +211,14 @@ jobs:
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: 设置 IP 地址
-      if: github.event.inputs.SETIP != '' && github.event.inputs.SETIP != '192.168.66.1'
+      if: github.event.inputs.SETIP != '' && github.event.inputs.SETIP != '192.168.10.1'
       id: setip
       run: |
         IPSET_VALUE="${{ github.event.inputs.SETIP }}"
-        sed -i "s/192\.168\.66\.1/$IPSET_VALUE/g" openwrt/package/kochiya/autoset/files/def_uci/zzz-autoset*
-        grep 'set network.lan.ipaddr=' openwrt/package/kochiya/autoset/files/def_uci/zzz-autoset*
+        # uci-defaults 里 25.12 起的默认 LAN IP 是 192.168.10.1（/24 那行也是），
+        # 旧脚本这里写的是 192.168.66.1 —— 从不命中，SETIP 一直被忽略。
+        sed -i "s/192\.168\.10\.1/$IPSET_VALUE/g" openwrt/package/kochiya/autoset/files/def_uci/zzz-autoset*
+        grep -n 'lan_ipaddr=\|set network.lan.ipaddr=' openwrt/package/kochiya/autoset/files/def_uci/zzz-autoset-rockchip*
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: 更新 & 安装 feeds
