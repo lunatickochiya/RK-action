@@ -1,0 +1,9 @@
+#!/bin/sh /etc/rc.common
+
+START=15
+
+start() {
+	[ "$(board_name)" = "shimeta,rk3588-aiot3588a" ] || return 0
+	[ -c /dev/dri/card0 ] || mknod /dev/dri/card0 c 226 128
+	[ -c /dev/dri/renderD129 ] || mknod /dev/dri/renderD129 c 226 128
+}
