@@ -13,5 +13,5 @@ i2ctransfer -y 6 w2@0x62 0x51 0x33
 
 while :; do
 	i2ctransfer -y 6 w2@0x62 0x33 0xab
-	sleep 20
+	sleep 5
 done
