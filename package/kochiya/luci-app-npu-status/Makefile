@@ -31,7 +31,7 @@ define Package/luci-app-npu-status/install
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/acl.d
 	$(INSTALL_DATA) ./files/usr/share/rpcd/acl.d/luci-app-npu-status.json $(1)/usr/share/rpcd/acl.d/
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/status/include
-	$(INSTALL_DATA) ./files/www/luci-static/resources/view/status/include/26_npu.js $(1)/www/luci-static/resources/view/status/include/
+	$(INSTALL_DATA) ./files/www/luci-static/resources/view/status/include/15_npu.js $(1)/www/luci-static/resources/view/status/include/
 endef
 
 $(eval $(call BuildPackage,luci-app-npu-status))
