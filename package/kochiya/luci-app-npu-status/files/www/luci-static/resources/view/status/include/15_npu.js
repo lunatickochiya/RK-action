@@ -8,7 +8,9 @@ var callStatus = rpc.declare({
 	expect: {}
 });
 
+var POLL_INTERVAL = 3000;
 var fastTimer = null;
+var cardEl = null;
 
 function fmtMHz(v) {
 	v = +v || 0;
@@ -57,7 +59,7 @@ function startFastPoll() {
 		if (document.hidden || !document.getElementById('npu-fast-root'))
 			return;
 		callStatus().then(applyData).catch(function() {});
-	}, 1000);
+	}, POLL_INTERVAL);
 }
 
 function barRow(id, label) {
@@ -77,6 +79,22 @@ function row(label, valueEl) {
 	]);
 }
 
+function buildCard() {
+	return E('div', { 'id': 'npu-fast-root' }, [
+		barRow('c0', 'Core 0'),
+		barRow('c1', 'Core 1'),
+		barRow('c2', 'Core 2'),
+		E('table', { 'class': 'table' }, [
+			row('NPU 驱动', E('span', { 'id': 'npu-drv' })),
+			row('VPU 解码', E('span', { 'id': 'vpu-dec' })),
+			row('VPU 编码', E('span', { 'id': 'vpu-enc' })),
+			row('VPU 活动会话', E('span', { 'id': 'vpu-sess' })),
+			row('温度', E('span', { 'id': 'temps' })),
+			row('Load', E('span', { 'id': 'loadavg' }))
+		])
+	]);
+}
+
 return baseclass.extend({
 	title: 'NPU / VPU',
 
@@ -85,22 +103,14 @@ return baseclass.extend({
 	},
 
 	render: function(d) {
-		var table = E('div', { 'id': 'npu-fast-root' }, [
-			barRow('c0', 'Core 0'),
-			barRow('c1', 'Core 1'),
-			barRow('c2', 'Core 2'),
-			E('table', { 'class': 'table' }, [
-				row('NPU 驱动', E('span', { 'id': 'npu-drv' })),
-				row('VPU 解码', E('span', { 'id': 'vpu-dec' })),
-				row('VPU 编码', E('span', { 'id': 'vpu-enc' })),
-				row('VPU 活动会话', E('span', { 'id': 'vpu-sess' })),
-				row('温度', E('span', { 'id': 'temps' })),
-				row('Load', E('span', { 'id': 'loadavg' }))
-			])
-		]);
+		if (!cardEl)
+			cardEl = buildCard();
 
 		applyData(d || {});
 		startFastPoll();
-		return table;
+
+		/* 复用同一个 DOM 节点：概览页每 5s 重新 render 时只是移动节点，
+		 * 不再销毁重建，避免进度条闪烁 */
+		return cardEl;
 	}
 });
