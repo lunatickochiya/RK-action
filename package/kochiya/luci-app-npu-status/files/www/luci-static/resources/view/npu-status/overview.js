@@ -52,7 +52,7 @@ return view.extend({
 
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, [ 'RKNPU（AI 推理）' ]),
-				E('div', { 'id': 'npu-ver', 'style': 'font-size:12px;opacity:.7;margin-bottom:6px' }, [ data.npu_ver || '' ]),
+				E('div', { 'id': 'npu-ver', 'style': 'font-size:12px;opacity:.7;margin-bottom:6px' }, [ (data.npu_ver || '') + (data.npu_freq ? '  ·  ' + (data.npu_freq/1000000).toFixed(0) + ' MHz' : '') ]),
 				barRow('core0', 'Core 0'),
 				barRow('core1', 'Core 1'),
 				barRow('core2', 'Core 2')
@@ -64,7 +64,7 @@ return view.extend({
 				E('div', { 'style': 'display:flex;font-size:12px;opacity:.7;margin:4px 0' }, [
 					E('span', { 'style': 'width:110px' }, [ '核心' ]),
 					E('span', { 'style': 'width:90px' }, [ '时钟' ]),
-					E('span', { 'style': 'width:120px' }, [ '累计任务' ]),
+					E('span', { 'style': 'width:120px' }, [ '任务/会话' ]),
 					E('span', { 'style': 'width:110px' }, [ '速率' ])
 				]),
 				coreRow('dec0', '解码 Core0'),
@@ -128,7 +128,7 @@ return view.extend({
 			setBar('core0', d.core0);
 			setBar('core1', d.core1);
 			setBar('core2', d.core2);
-			setText('npu-ver', d.npu_ver);
+			setText('npu-ver', (d.npu_ver || '') + (d.npu_freq ? '  ·  ' + (d.npu_freq/1000000).toFixed(0) + ' MHz' : ''));
 			setText('vpu-ver', d.vpu_ver);
 
 			setCore('dec0', d.dec0_clk, d.dec0_tasks);

@@ -31,8 +31,10 @@ get_status() {
 	json_add_int enc1_clk "$(rd_int /proc/mpp_service/rkvenc-core1/aclk)"
 	json_add_int dec0_tasks "$(rd_int /proc/mpp_service/rkvdec-core0/task_count)"
 	json_add_int dec1_tasks "$(rd_int /proc/mpp_service/rkvdec-core1/task_count)"
-	json_add_int enc0_tasks "$(rd_int /proc/mpp_service/rkvenc-core0/task_count)"
-	json_add_int enc1_tasks "$(rd_int /proc/mpp_service/rkvenc-core1/task_count)"
+	enc0_sessions=$(rd /proc/mpp_service/rkvenc-core0/sessions-info | wc -l)
+	enc1_sessions=$(rd /proc/mpp_service/rkvenc-core1/sessions-info | wc -l)
+	json_add_int enc0_tasks "$enc0_sessions"
+	json_add_int enc1_tasks "$enc1_sessions"
 
 	# ---------- 温度 (millidegrees) ----------
 	for z in /sys/class/thermal/thermal_zone*; do
