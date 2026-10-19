@@ -30,10 +30,8 @@ define Package/luci-app-npu-status/install
 	$(INSTALL_BIN) ./files/usr/libexec/rpcd/npu_status $(1)/usr/libexec/rpcd/npu_status
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/acl.d
 	$(INSTALL_DATA) ./files/usr/share/rpcd/acl.d/luci-app-npu-status.json $(1)/usr/share/rpcd/acl.d/
-	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d
-	$(INSTALL_DATA) ./files/usr/share/luci/menu.d/luci-app-npu-status.json $(1)/usr/share/luci/menu.d/
-	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/npu-status
-	$(INSTALL_DATA) ./files/www/luci-static/resources/view/npu-status/overview.js $(1)/www/luci-static/resources/view/npu-status/
+	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/status/include
+	$(INSTALL_DATA) ./files/www/luci-static/resources/view/status/include/26_npu.js $(1)/www/luci-static/resources/view/status/include/
 endef
 
 $(eval $(call BuildPackage,luci-app-npu-status))
