@@ -49,7 +49,6 @@ function applyData(d) {
 	setText('vpu-enc', 'Core0 ' + fmtMHz(d.enc0_clk) + ' · ' + (d.enc0_tasks || 0) + ' 会话　Core1 ' + fmtMHz(d.enc1_clk) + ' · ' + (d.enc1_tasks || 0) + ' 会话');
 	setText('vpu-sess', String(((d.vpu_sessions || '').match(/session:/g) || []).length));
 	setText('temps', 'SoC ' + fmtTemp(d.temp_package) + ' · NPU ' + fmtTemp(d.temp_npu) + ' · GPU ' + fmtTemp(d.temp_gpu));
-	setText('loadavg', d.loadavg || '—');
 }
 
 function startFastPoll() {
@@ -62,35 +61,39 @@ function startFastPoll() {
 	}, POLL_INTERVAL);
 }
 
+/* 与「内存」卡片一致：标签占 33%，进度条占剩余宽度 */
 function barRow(id, label) {
-	return E('div', { 'style': 'display:flex;align-items:center;margin:2px 0' }, [
-		E('span', { 'style': 'width:64px;flex:none' }, [ label ]),
-		E('div', { 'class': 'cbi-progressbar', 'style': 'flex:1' }, [
-			E('div', { 'id': 'npu-fill-' + id, 'style': 'width:0%' }, [])
+	return E('tr', { 'class': 'tr' }, [
+		E('td', { 'class': 'td left', 'width': '33%' }, [ label ]),
+		E('td', { 'class': 'td left' }, [
+			E('div', { 'class': 'cbi-progressbar', 'title': label }, [
+				E('div', { 'id': 'npu-fill-' + id, 'style': 'width:0%' }, [])
+			])
 		]),
-		E('span', { 'id': 'npu-val-' + id, 'style': 'width:44px;text-align:right' }, [ '0%' ])
+		E('td', { 'class': 'td left', 'style': 'width:48px;text-align:right' }, [
+			E('span', { 'id': 'npu-val-' + id }, [ '0%' ])
+		])
 	]);
 }
 
 function row(label, valueEl) {
 	return E('tr', { 'class': 'tr' }, [
 		E('td', { 'class': 'td left', 'width': '33%' }, [ label ]),
-		E('td', { 'class': 'td left' }, [ valueEl ])
+		E('td', { 'class': 'td left', 'colspan': '2' }, [ valueEl ])
 	]);
 }
 
 function buildCard() {
 	return E('div', { 'id': 'npu-fast-root' }, [
-		barRow('c0', 'Core 0'),
-		barRow('c1', 'Core 1'),
-		barRow('c2', 'Core 2'),
 		E('table', { 'class': 'table' }, [
+			barRow('c0', 'Core 0'),
+			barRow('c1', 'Core 1'),
+			barRow('c2', 'Core 2'),
 			row('NPU 驱动', E('span', { 'id': 'npu-drv' })),
 			row('VPU 解码', E('span', { 'id': 'vpu-dec' })),
 			row('VPU 编码', E('span', { 'id': 'vpu-enc' })),
 			row('VPU 活动会话', E('span', { 'id': 'vpu-sess' })),
-			row('温度', E('span', { 'id': 'temps' })),
-			row('Load', E('span', { 'id': 'loadavg' }))
+			row('温度', E('span', { 'id': 'temps' }))
 		])
 	]);
 }
