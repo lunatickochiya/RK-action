@@ -61,17 +61,17 @@ function startFastPoll() {
 	}, POLL_INTERVAL);
 }
 
-/* 与「内存」卡片一致：标签占 33%，进度条占剩余宽度 */
-function barRow(id, label) {
+/* 进度条与「内存」卡片同宽（标签列 33%），百分比在进度条下方居中 */
+function barRow(id) {
 	return E('tr', { 'class': 'tr' }, [
-		E('td', { 'class': 'td left', 'width': '33%' }, [ label ]),
-		E('td', { 'class': 'td left' }, [
-			E('div', { 'class': 'cbi-progressbar', 'title': label }, [
+		E('td', { 'class': 'td left', 'width': '33%' }, [ '' ]),
+		E('td', { 'class': 'td left', 'colspan': '2' }, [
+			E('div', { 'class': 'cbi-progressbar' }, [
 				E('div', { 'id': 'npu-fill-' + id, 'style': 'width:0%' }, [])
+			]),
+			E('div', { 'style': 'text-align:center;font-size:90%;line-height:1.3;margin-top:1px' }, [
+				E('span', { 'id': 'npu-val-' + id }, [ '0%' ])
 			])
-		]),
-		E('td', { 'class': 'td left', 'style': 'width:48px;text-align:right' }, [
-			E('span', { 'id': 'npu-val-' + id }, [ '0%' ])
 		])
 	]);
 }
@@ -86,9 +86,9 @@ function row(label, valueEl) {
 function buildCard() {
 	return E('div', { 'id': 'npu-fast-root' }, [
 		E('table', { 'class': 'table' }, [
-			barRow('c0', 'Core 0'),
-			barRow('c1', 'Core 1'),
-			barRow('c2', 'Core 2'),
+			barRow('c0'),
+			barRow('c1'),
+			barRow('c2'),
 			row('NPU 驱动', E('span', { 'id': 'npu-drv' })),
 			row('VPU 解码', E('span', { 'id': 'vpu-dec' })),
 			row('VPU 编码', E('span', { 'id': 'vpu-enc' })),
