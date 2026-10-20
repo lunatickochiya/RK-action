@@ -45,7 +45,7 @@ function applyData(d) {
 	setBar('c1', d.core1);
 	setBar('c2', d.core2);
 	setText('npu-drv', (d.npu_ver || '—') + ' · ' + fmtMHz(d.npu_freq));
-	setText('vpu-dec', 'Core0 ' + fmtMHz(d.dec0_clk) + ' · ' + (d.dec0_tasks || 0) + ' 任务　Core1 ' + fmtMHz(d.dec1_clk) + ' · ' + (d.dec1_tasks || 0) + ' 任务');
+	setText('vpu-dec', 'Core0 ' + fmtMHz(d.dec0_clk) + ' · 累计 ' + (d.dec0_tasks || 0) + ' 任务　Core1 ' + fmtMHz(d.dec1_clk) + ' · 累计 ' + (d.dec1_tasks || 0) + ' 任务');
 	setText('vpu-enc', 'Core0 ' + fmtMHz(d.enc0_clk) + ' · ' + (d.enc0_tasks || 0) + ' 会话　Core1 ' + fmtMHz(d.enc1_clk) + ' · ' + (d.enc1_tasks || 0) + ' 会话');
 	setText('vpu-sess', String(((d.vpu_sessions || '').match(/session:/g) || []).length));
 	setText('temps', 'SoC ' + fmtTemp(d.temp_package) + ' · NPU ' + fmtTemp(d.temp_npu) + ' · GPU ' + fmtTemp(d.temp_gpu));
@@ -86,9 +86,9 @@ function row(label, valueEl) {
 function buildCard() {
 	return E('div', { 'id': 'npu-fast-root' }, [
 		E('table', { 'class': 'table' }, [
-			barRow('c0', 'Core 0'),
-			barRow('c1', 'Core 1'),
-			barRow('c2', 'Core 2'),
+			barRow('c0', 'NPU Core 0'),
+			barRow('c1', 'NPU Core 1'),
+			barRow('c2', 'NPU Core 2'),
 			row('NPU 驱动', E('span', { 'id': 'npu-drv' })),
 			row('VPU 解码', E('span', { 'id': 'vpu-dec' })),
 			row('VPU 编码', E('span', { 'id': 'vpu-enc' })),

@@ -319,6 +319,15 @@ define Package/autoset-uci-rockchip/install
 		$(INSTALL_BIN) ./files/def_uci/zzz-autoset-rockchip $(1)/etc/uci-defaults/zz99-autoset \
 	)
 	$(INSTALL_BIN) ./files/def_uci/998-wireless-set $(1)/etc/uci-defaults/z998-wireless
+	# NPU/VPU 状态卡：仅 RK35xx（按机型 U-Boot trusted-firmware 包名判断）
+	if echo "$(CONFIG_PACKAGE_trusted-firmware-a-rk3528) $(CONFIG_PACKAGE_trusted-firmware-a-rk3566) $(CONFIG_PACKAGE_trusted-firmware-a-rk3568) $(CONFIG_PACKAGE_trusted-firmware-a-rk3576) $(CONFIG_PACKAGE_trusted-firmware-a-rk3588)" | grep -q y; then \
+		$(INSTALL_DIR) $(1)/usr/libexec/rpcd; \
+		$(INSTALL_BIN) ./files/generic/npu_status $(1)/usr/libexec/rpcd/npu_status; \
+		$(INSTALL_DIR) $(1)/usr/share/rpcd/acl.d; \
+		$(INSTALL_DATA) ./files/generic/autoset-npu-status.json $(1)/usr/share/rpcd/acl.d/; \
+		$(INSTALL_DIR) $(1)/www/luci-static/resources/view/status/include; \
+		$(INSTALL_DATA) ./files/generic/15_npu.js $(1)/www/luci-static/resources/view/status/include/; \
+	fi
 endef
 
 define Package/autoset-uci-meson/install

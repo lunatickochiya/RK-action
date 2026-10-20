@@ -25,10 +25,11 @@ get_status() {
 	json_add_string vpu_ver "$(rd /proc/mpp_service/version)"
 	json_add_string vpu_sessions "$(rd /proc/mpp_service/sessions-summary)"
 
-	json_add_int dec0_clk "$(rd_int /proc/mpp_service/rkvdec-core0/aclk)"
-	json_add_int dec1_clk "$(rd_int /proc/mpp_service/rkvdec-core1/aclk)"
-	json_add_int enc0_clk "$(rd_int /proc/mpp_service/rkvenc-core0/aclk)"
-	json_add_int enc1_clk "$(rd_int /proc/mpp_service/rkvenc-core1/aclk)"
+	# 实际频率在 debugfs clk 树；/proc/.../aclk 是寄存器状态（恒为 0）
+	json_add_int dec0_clk "$(rd_int /sys/kernel/debug/clk/aclk_rkvdec0/clk_rate)"
+	json_add_int dec1_clk "$(rd_int /sys/kernel/debug/clk/aclk_rkvdec1/clk_rate)"
+	json_add_int enc0_clk "$(rd_int /sys/kernel/debug/clk/aclk_rkvenc0/clk_rate)"
+	json_add_int enc1_clk "$(rd_int /sys/kernel/debug/clk/aclk_rkvenc1/clk_rate)"
 	json_add_int dec0_tasks "$(rd_int /proc/mpp_service/rkvdec-core0/task_count)"
 	json_add_int dec1_tasks "$(rd_int /proc/mpp_service/rkvdec-core1/task_count)"
 	enc0_sessions=$(rd /proc/mpp_service/rkvenc-core0/sessions-info | wc -l)

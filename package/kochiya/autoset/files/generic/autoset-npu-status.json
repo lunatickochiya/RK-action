@@ -1,5 +1,5 @@
 {
-	"luci-app-npu-status": {
+	"autoset-npu-status": {
 		"description": "Grant access to NPU / VPU status",
 		"read": {
 			"ubus": {
