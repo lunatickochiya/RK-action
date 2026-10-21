@@ -10,7 +10,7 @@ include $(INCLUDE_DIR)/target.mk
 
 PKG_NAME:=autoset
 PKG_VERSION:=5.0
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 PKG_LICENSE:=GPLv3
 PKG_LICENSE_FILES:=LICENSE
 
@@ -310,6 +310,8 @@ endef
 define Package/autoset/install
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/acl.d
 	$(CP) ./files/luci-mod-status-autoset.json $(1)/usr/share/rpcd/acl.d/
+	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/status/include
+	$(INSTALL_DATA) ./files/generic/11_sysinfo.js $(1)/www/luci-static/resources/view/status/include/
 endef
 
 define Package/autoset-uci-rockchip/install
