@@ -5,9 +5,25 @@
 # QQ group :286754582  https://jq.qq.com/?_wv=1027&k=5QgVYsC
 #=================================================
 
-# 本仓库是 rockchip 25.12 + Linux 6.6 专用构建仓库（源码分支 openwrt-25.12-6.6-rk）
+# 本仓库是 rockchip 25.12 构建仓库，按 OpenWrt_PATCH_FILE_DIR 选择内核画像：
+#   openwrt-2512-rk     -> Linux 6.6（源码分支 openwrt-25.12-6.6-rk，KERNEL_TESTING_PATCHVER）
+#   openwrt-2512-618-rk -> Linux 6.18（源码分支 openwrt-25.12-6.18-rk，KERNEL_PATCHVER 默认）
+OpenWrt_PATCH_FILE_DIR="${OpenWrt_PATCH_FILE_DIR:-openwrt-2512-rk}"
+case "$OpenWrt_PATCH_FILE_DIR" in
+openwrt-2512-618-rk)
+	KERNEL_VERSION=6.18
+	KERNEL_BBR_PATCH_DIR=mypatch-core-618
+	KMOD_EXCLUDE_LIST=package-configs/kmod_exclude_list_kernel618.config
+	;;
+*)
+	KERNEL_VERSION=6.6
+	KERNEL_BBR_PATCH_DIR=mypatch-core-66
+	KMOD_EXCLUDE_LIST=package-configs/kmod_exclude_list_kernel66.config
+	;;
+esac
+
 function init_openwrt_patch_file_dir_2512_rk() {
-OpenWrt_PATCH_FILE_DIR="openwrt-2512-rk"
+: "${OpenWrt_PATCH_FILE_DIR:=openwrt-2512-rk}"
 }
 
 function init_pkg_env() {
@@ -109,14 +125,15 @@ function init_openwrt_patch_common() {
 	fi
 
 	if [ "$TRY_BBR_V3" = "1" ]; then
-		# 25.12 + 6.6 的 BBR v3 补丁放在 mypatch-core-66/mypatch-bbr-v3，
-		# 构建时拷进 mypatch-core 一起打（同 AP-action-IPQ）。
-		if [ ! -d $OpenWrt_PATCH_FILE_DIR/mypatch-core-66/mypatch-bbr-v3 ] || [ ! -d $OpenWrt_PATCH_FILE_DIR/mypatch-core ]; then
-			echo "::error ::BBR v3 patch directory is incomplete"
+		# BBR v3 的内核补丁按内核版本分开：6.6 在 mypatch-core-66，
+		# 6.18 在 mypatch-core-618；构建时拷进 mypatch-core 一起打。
+		local bbr_patch_dir="$OpenWrt_PATCH_FILE_DIR/$KERNEL_BBR_PATCH_DIR/mypatch-bbr-v3"
+		if [ ! -d "$bbr_patch_dir" ] || [ ! -d "$OpenWrt_PATCH_FILE_DIR/mypatch-core" ]; then
+			echo "::error ::BBR v3 patch directory is incomplete: $bbr_patch_dir"
 			return 1
 		fi
-		cp -f $OpenWrt_PATCH_FILE_DIR/mypatch-core-66/mypatch-bbr-v3/*.patch $OpenWrt_PATCH_FILE_DIR/mypatch-core/
-		echo "----$Matrix_Target----bbr-v3---"
+		cp -f "$bbr_patch_dir"/*.patch "$OpenWrt_PATCH_FILE_DIR/mypatch-core/"
+		echo "----$Matrix_Target----bbr-v3-$KERNEL_VERSION---"
 		echo "TRY_BBR_V3_NAME=_BBR_V3" >> $GITHUB_ENV
 	fi
 
@@ -153,15 +170,18 @@ CONFIG_IB=y
 		echo "----$Matrix_Target----IB---"
 	fi
 
-	# 25.12 主线内核是 6.12，rockchip 分支把板级支持放在 6.6（KERNEL_TESTING_PATCHVER），
-	# 所以这里恒开 CONFIG_TESTING_KERNEL（machine-config 里已写死，注入是幂等的兜底）。
-	if [ "$TEST_KERNEL" = "1" ]; then
+	# 6.6 画像把板级支持放在 KERNEL_TESTING_PATCHVER，需要恒开 CONFIG_TESTING_KERNEL；
+	# 6.18 画像的 target/linux/rockchip/Makefile 已直接使用 KERNEL_PATCHVER:=6.18，
+	# 再注入 TESTING_KERNEL 反而会让 KERNEL_PATCHVER 变空，所以 6.18 下跳过。
+	if [ "$TEST_KERNEL" = "1" ] && [ "$KERNEL_VERSION" = "6.6" ]; then
 		echo "----$Matrix_Target----TEST-KERNEL---"
 		for cfg in machine-configs/$OpenWrt_PATCH_FILE_DIR/*.config; do
 			grep -q '^CONFIG_TESTING_KERNEL=y' "$cfg" || sed -i '1i\
 CONFIG_TESTING_KERNEL=y\nCONFIG_HAS_TESTING_KERNEL=y' "$cfg"
 		done
 		echo "Kernel_Test=_Kernel_Test_Ver" >> $GITHUB_ENV
+	elif [ "$TEST_KERNEL" = "1" ]; then
+		echo "----$Matrix_Target----TEST-KERNEL-skipped-for-$KERNEL_VERSION---"
 	fi
 
 	if [ "$ADD_eBPF" = "1" ]; then
@@ -259,12 +279,13 @@ function copy_openwrt_turboacc_nft_packages() {
 	cp -RT "$package_source/nftables-$nftables_version/nftables" openwrt/package/network/utils/nftables || return 1
 }
 
-# 25.12 + Linux 6.6 的 SFE/TurboACC（移植自 AP-action-IPQ core-2512-ipq.sh add_openwrt_sfe_66_2512）：
+# 25.12 的 SFE/TurboACC（移植自 AP-action-IPQ core-2512-ipq.sh add_openwrt_sfe_66_2512）：
 # turboacc 用固定 commit 取包（不再跟随浮动分支 / luci 脚本），并套用 stale-conntrack 修复。
+# 函数名保留 66 以兼容现有工作流；内核版本由 KERNEL_VERSION 决定（6.6 / 6.18）。
 function add_openwrt_sfe_66_2512() {
 	local config_name="${Target_CFG_Machine}-${Matrix_Target}.config"
 	local config_file="package-configs/$OpenWrt_PATCH_FILE_DIR/$config_name"
-	local kernel_config="openwrt/target/linux/generic/config-6.6"
+	local kernel_config="openwrt/target/linux/generic/config-$KERNEL_VERSION"
 	local turboacc_luci_commit="530092c532839efb96e9f328d34dbf3adff4b557"
 	local turboacc_package_commit="c56760174a4b25e2a4f7566e3e4058e75e4ac9f8"
 	local old_driver_hash="659fa82a431e15af797a6c7069faeee02810453ad8b576c51c29f95a1761a045"
@@ -276,7 +297,7 @@ function add_openwrt_sfe_66_2512() {
 		return 1
 	fi
 	if [ ! -f "$kernel_config" ]; then
-		echo "::error ::OpenWrt 6.6 kernel config not found: $kernel_config"
+		echo "::error ::OpenWrt $KERNEL_VERSION kernel config not found: $kernel_config"
 		return 1
 	fi
 
@@ -284,8 +305,8 @@ function add_openwrt_sfe_66_2512() {
 	(
 		trap 'rm -rf "$temp_dir"' EXIT
 		mkdir -p "$temp_dir/package" openwrt/package \
-			openwrt/target/linux/generic/pending-6.6 \
-			openwrt/target/linux/generic/hack-6.6 || exit 1
+			openwrt/target/linux/generic/pending-$KERNEL_VERSION \
+			openwrt/target/linux/generic/hack-$KERNEL_VERSION || exit 1
 		curl -fsSL "https://codeload.github.com/chenmozhijin/turboacc/tar.gz/$turboacc_package_commit" \
 			-o "$temp_dir/package.tar.gz" || exit 1
 		tar -xzf "$temp_dir/package.tar.gz" -C "$temp_dir/package" --strip-components=1 || exit 1
@@ -297,12 +318,12 @@ function add_openwrt_sfe_66_2512() {
 		echo "----sfe: applying fast-classifier stale-conntrack fix----"
 		patch -d openwrt/package -p1 --no-backup-if-mismatch --quiet \
 			< "$OpenWrt_PATCH_FILE_DIR/sfe-fast-classifier-use-live-conntrack.patch" || exit 1
-		cp -f "$temp_dir/package/pending-6.6/613-netfilter_optional_tcp_window_check.patch" \
-			openwrt/target/linux/generic/pending-6.6/ || exit 1
-		cp -f "$temp_dir/package/hack-6.6/952-add-net-conntrack-events-support-multiple-registrant.patch" \
-			openwrt/target/linux/generic/hack-6.6/ || exit 1
-		cp -f "$temp_dir/package/hack-6.6/953-net-patch-linux-kernel-to-support-shortcut-fe.patch" \
-			openwrt/target/linux/generic/hack-6.6/ || exit 1
+		cp -f "$temp_dir/package/pending-$KERNEL_VERSION/613-netfilter_optional_tcp_window_check.patch" \
+			openwrt/target/linux/generic/pending-$KERNEL_VERSION/ || exit 1
+		cp -f "$temp_dir/package/hack-$KERNEL_VERSION/952-add-net-conntrack-events-support-multiple-registrant.patch" \
+			openwrt/target/linux/generic/hack-$KERNEL_VERSION/ || exit 1
+		cp -f "$temp_dir/package/hack-$KERNEL_VERSION/953-net-patch-linux-kernel-to-support-shortcut-fe.patch" \
+			openwrt/target/linux/generic/hack-$KERNEL_VERSION/ || exit 1
 
 		if [[ "$Matrix_Target" == *-nftables ]]; then
 			mkdir -p "$temp_dir/luci" openwrt/package/turboacc || exit 1
@@ -322,9 +343,9 @@ function add_openwrt_sfe_66_2512() {
 
 	if [[ "$Matrix_Target" == *-iptables ]]; then
 		if ! grep -q '^CONFIG_PACKAGE_luci-app-turboacc-ipt=y$' "$config_file"; then
-			cat >> "$config_file" <<'EOF'
+			cat >> "$config_file" <<EOF
 
-# SFE acceleration for kernel 6.6 (iptables)
+# SFE acceleration for kernel $KERNEL_VERSION (iptables)
 CONFIG_PACKAGE_luci-app-turboacc-ipt=y
 # CONFIG_PACKAGE_luci-app-turboacc-ipt_INCLUDE_PDNSD is not set
 CONFIG_PACKAGE_kmod-ipt-offload=y
@@ -335,9 +356,9 @@ EOF
 		fi
 	elif [[ "$Matrix_Target" == *-nftables ]]; then
 		if ! grep -q '^CONFIG_PACKAGE_luci-app-turboacc=y$' "$config_file"; then
-			cat >> "$config_file" <<'EOF'
+			cat >> "$config_file" <<EOF
 
-# SFE acceleration for kernel 6.6 (nftables)
+# SFE acceleration for kernel $KERNEL_VERSION (nftables)
 CONFIG_PACKAGE_luci-app-turboacc=y
 # CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_OFFLOADING is not set
 CONFIG_PACKAGE_luci-app-turboacc_INCLUDE_SHORTCUT_FE=y
@@ -356,7 +377,7 @@ EOF
 	fi
 
 	add_openwrt_sfe_kmods
-	echo "----$Matrix_Target-----SFE-6.6----"
+	echo "----$Matrix_Target-----SFE-$KERNEL_VERSION----"
 }
 
 function add_openwrt_sfe_kmods() {
@@ -655,10 +676,10 @@ fix_openwrt_config_eror
 }
 
 function add_all_kmod_config() {
-# 25.12 固定用 6.6 测试内核（machine-config 里 CONFIG_TESTING_KERNEL=y），
-# 用本仓库的 6.6 排除表（不使用 IPQ 的 6.12 列表文件）：额外参考 IPQ 补入了 lunatic7 feed
-# 里在 25.12 上编不过的 kmod（qmi_wwan_s、openvswitch*、xr_usb_serial_common 等）
-KMOD_Compile_Exclude_List_Route=package-configs/kmod_exclude_list_kernel66.config
+# 按内核画像使用对应的排除表：6.6 用 kernel66，6.18 用 kernel618。
+# 排除表来自 25.12 全量 kmod 编译的失败清单（qmi_wwan_s、openvswitch*、
+# xr_usb_serial_common 等），换内核后如果还有编不过的 kmod，追加到对应文件即可。
+KMOD_Compile_Exclude_List_Route="$KMOD_EXCLUDE_LIST"
 echo "The exclude List route is $KMOD_Compile_Exclude_List_Route"
 all_kmod_config_core
 }
@@ -691,7 +712,7 @@ fi
 
 
 function add_openwrt_kmods() {
-	if [ "$OpenWrt_PATCH_FILE_DIR" = "openwrt-2512-rk" ]; then
+	if [[ "$OpenWrt_PATCH_FILE_DIR" == openwrt-2512-* ]]; then
 	add_all_kmod_config
 	cd openwrt && make defconfig && cd ../
 	add_all_kmod_config
