@@ -1,0 +1,25 @@
+From f6943fcba9e495fa14386483c2164d1774e907b9 Mon Sep 17 00:00:00 2001
+From: lunatickochiya <125438787@qq.com>
+Date: Mon, 28 Sep 2026 17:51:23 +0800
+Subject: [PATCH 09/10] xtables-addons: place Lua Kbuild flags before object
+ list
+
+---
+ net/xtables-addons/patches/502-kernel-6.18-kbuild-flags.patch | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/xtables-addons/patches/502-kernel-6.18-kbuild-flags.patch b/net/xtables-addons/patches/502-kernel-6.18-kbuild-flags.patch
+index 895108b..2c2cf30 100644
+--- a/net/xtables-addons/patches/502-kernel-6.18-kbuild-flags.patch
++++ b/net/xtables-addons/patches/502-kernel-6.18-kbuild-flags.patch
+@@ -1,6 +1,6 @@
+ --- a/extensions/LUA/Kbuild
+ +++ b/extensions/LUA/Kbuild
+-@@ -51,0 +52,4 @@
++@@ -1,0 +2,4 @@
+ +ccflags-y += -DDEBUG
+ +ccflags-y += -I$(src)/prot_buf_new
+ +ccflags-y += -isystem $(shell $(CC) -print-file-name=include)
+-- 
+2.55.0
+

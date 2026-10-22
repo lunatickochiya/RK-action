@@ -1,0 +1,25 @@
+From fdf3ae9919f775c485dedf3ea66049744d3b3f85 Mon Sep 17 00:00:00 2001
+From: lunatickochiya <125438787@qq.com>
+Date: Mon, 28 Sep 2026 17:40:00 +0800
+Subject: [PATCH 07/10] xtables-addons: correct pknock timer patch context
+
+---
+ net/xtables-addons/patches/503-kernel-6.18-timer-api.patch | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/xtables-addons/patches/503-kernel-6.18-timer-api.patch b/net/xtables-addons/patches/503-kernel-6.18-timer-api.patch
+index 9d443f4..4192185 100644
+--- a/net/xtables-addons/patches/503-kernel-6.18-timer-api.patch
++++ b/net/xtables-addons/patches/503-kernel-6.18-timer-api.patch
+@@ -1,7 +1,7 @@
+ --- a/extensions/pknock/xt_pknock.c
+ +++ b/extensions/pknock/xt_pknock.c
+ @@ -299,1 +299,1 @@
+--	del_timer(&rule->timer);
++--		del_timer(&rule->timer);
+ +	timer_delete(&rule->timer);
+ @@ -358,1 +358,1 @@
+ -	struct xt_pknock_rule *rule = from_timer(rule, tl, timer);
+-- 
+2.55.0
+

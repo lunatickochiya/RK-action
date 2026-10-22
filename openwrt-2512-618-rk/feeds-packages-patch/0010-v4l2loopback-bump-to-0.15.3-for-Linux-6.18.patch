@@ -1,0 +1,37 @@
+From 186a9d611b6ea5a68e126cdf430e6a18268add6c Mon Sep 17 00:00:00 2001
+From: lunatickochiya <125438787@qq.com>
+Date: Mon, 28 Sep 2026 18:59:41 +0800
+Subject: [PATCH 10/10] v4l2loopback: bump to 0.15.3 for Linux 6.18
+
+---
+ kernel/v4l2loopback/Makefile | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/kernel/v4l2loopback/Makefile b/kernel/v4l2loopback/Makefile
+index c2baf6f..6dae9e2 100644
+--- a/kernel/v4l2loopback/Makefile
++++ b/kernel/v4l2loopback/Makefile
+@@ -6,13 +6,13 @@ include $(TOPDIR)/rules.mk
+ include $(INCLUDE_DIR)/kernel.mk
+ 
+ PKG_NAME:=v4l2loopback
+-PKG_VERSION:=0.15.1
++PKG_VERSION:=0.15.3
+ PKG_RELEASE:=1
+ 
+ PKG_SOURCE_PROTO:=git
+ PKG_SOURCE_URL:=https://github.com/umlaeute/v4l2loopback
+ PKG_SOURCE_VERSION:=v$(PKG_VERSION)
+-PKG_MIRROR_HASH:=ffd44e59bef318d7cb72d3f00a3512c7712fd5ce9b41875f27e061864c67457f
++PKG_MIRROR_HASH:=34a9b7d58c42be0b6f7b60c960df4bdf26f34a97c360bd9819057dc0732beca6
+ 
+ PKG_MAINTAINER:=Michel Promonet <michel.promonet@free.fr>
+ PKG_CPE_ID:=cpe:/o:v4l2loopback_project:v4l2loopback
+@@ -48,4 +48,3 @@ define Build/Compile
+ endef
+ 
+ $(eval $(call KernelPackage,v4l2loopback))
+-
+-- 
+2.55.0
+
