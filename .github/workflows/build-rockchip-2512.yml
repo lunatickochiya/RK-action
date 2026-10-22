@@ -41,7 +41,7 @@ on:
       patch_repo:
         description: 'Patch options (json), see README'
         required: true
-        default: '{"BCM_FULLCONE": "1", "TRY_BBR_V3": "1", "TEST_KERNEL": "1", "Firewall_Allow_WAN": "0", "ADD_eBPF": "0", "ADD_IB": "1", "ADD_SDK": "1"}'
+        default: '{"BCM_FULLCONE": "1", "TRY_BBR_V3": "1", "TEST_KERNEL": "1", "ADD_eBPF": "0", "ADD_IB": "1", "ADD_SDK": "1"}'
 
       config_repo:
         description: 'Build/upload options (json), see README'

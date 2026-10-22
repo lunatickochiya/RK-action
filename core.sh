@@ -62,7 +62,6 @@ function config_json_input_set() {
 function patch_json_input_set() {
 	echo -e "BCM_FULLCONE=$(echo $PATCH_JSON_INPUT | jq -r ".BCM_FULLCONE")" >> "$GITHUB_ENV"
 	echo -e "TRY_BBR_V3=$(echo $PATCH_JSON_INPUT | jq -r ".TRY_BBR_V3")" >> "$GITHUB_ENV"
-	echo -e "Firewall_Allow_WAN=$(echo $PATCH_JSON_INPUT | jq -r ".Firewall_Allow_WAN")" >> "$GITHUB_ENV"
 	echo -e "ADD_IB=$(echo $PATCH_JSON_INPUT | jq -r ".ADD_IB")" >> "$GITHUB_ENV"
 	echo -e "ADD_SDK=$(echo $PATCH_JSON_INPUT | jq -r ".ADD_SDK")" >> "$GITHUB_ENV"
 }
@@ -114,14 +113,6 @@ function init_openwrt_patch_common() {
 			printf '\n%s\nBASE_FEED:=\n' "$sdk_base_feed_marker" >> "$sdk_makefile" || return 1
 		fi
 		echo "----$Matrix_Target----sdk-base-feed-cleared---"
-	fi
-
-	if [ "$Firewall_Allow_WAN" = "1" ]; then
-		sed -i '/^	commit$/i\
-		set firewall.@zone[1].input="ACCEPT"
-		' package/kochiya/autoset/files/def_uci/zzz-autoset*
-		echo "----$Matrix_Target----wan-allow---"
-		echo "WAN_NAME=_WAN_ALLOW" >> $GITHUB_ENV
 	fi
 
 	if [ "$TRY_BBR_V3" = "1" ]; then

@@ -90,7 +90,6 @@ eBPF 变体再追加 `_eBPF`）：
 | `BCM_FULLCONE` | 全锥形 NAT（iptables/nftables 各一套补丁） |
 | `TRY_BBR_V3` | TCP BBR v3（6.6 → `hack-6.6`，6.18 → `hack-6.18`） |
 | `ADD_IB` / `ADD_SDK` | 追加 ImageBuilder / SDK 产物 |
-| `Firewall_Allow_WAN` | WAN 侧 input 放行 |
 | `ADD_eBPF` | eBPF/dae 相关配置 |
 
 > docker 组件（`dockerd` + `luci-app-dockerman` + `DOCKER_*` 选项）已经写进
