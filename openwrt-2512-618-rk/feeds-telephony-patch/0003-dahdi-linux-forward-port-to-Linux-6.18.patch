@@ -1,0 +1,156 @@
+From 35009c17c746df27d0ed4d953e0dc61e61471313 Mon Sep 17 00:00:00 2001
+From: lunatickochiya <125438787@qq.com>
+Date: Mon, 28 Sep 2026 18:54:52 +0800
+Subject: [PATCH 3/3] dahdi-linux: forward-port to Linux 6.18
+
+---
+ libs/dahdi-linux/Makefile                     |  4 +-
+ .../210-kernel-h-Add-wrappers-for.patch       | 27 +++++++
+ .../patches/211-Kbuild-Use-ccflag-y.patch     | 79 +++++++++++++++++++
+ 3 files changed, 108 insertions(+), 2 deletions(-)
+ create mode 100644 libs/dahdi-linux/patches/210-kernel-h-Add-wrappers-for.patch
+ create mode 100644 libs/dahdi-linux/patches/211-Kbuild-Use-ccflag-y.patch
+
+diff --git a/libs/dahdi-linux/Makefile b/libs/dahdi-linux/Makefile
+index 8b91c1a..b692d95 100644
+--- a/libs/dahdi-linux/Makefile
++++ b/libs/dahdi-linux/Makefile
+@@ -10,7 +10,7 @@ include $(INCLUDE_DIR)/kernel.mk
+ 
+ PKG_NAME:=dahdi-linux
+ PKG_VERSION:=3.4.0
+-PKG_RELEASE:=2
++PKG_RELEASE:=3
+ 
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+ PKG_SOURCE_URL:=https://github.com/asterisk/$(PKG_NAME)/releases/download/v$(PKG_VERSION)
+@@ -42,7 +42,7 @@ endef
+ define KernelPackage/dahdi-echocan-oslec
+   SUBMENU:=Voice over IP
+   TITLE:=DAHDI OSLEC echo canceller support
+-  DEPENDS:=kmod-dahdi +kmod-echo
++  DEPENDS:=kmod-dahdi +LINUX_6_12:kmod-echo +!LINUX_6_12:kmod-oslec
+   URL:=http://www.asterisk.org/
+   FILES:=$(PKG_BUILD_DIR)/drivers/dahdi/dahdi_echocan_oslec.$(LINUX_KMOD_SUFFIX)
+   AUTOLOAD:=$(call AutoProbe,dahdi_echocan_oslec)
+diff --git a/libs/dahdi-linux/patches/210-kernel-h-Add-wrappers-for.patch b/libs/dahdi-linux/patches/210-kernel-h-Add-wrappers-for.patch
+new file mode 100644
+index 0000000..52d8d6f
+--- /dev/null
++++ b/libs/dahdi-linux/patches/210-kernel-h-Add-wrappers-for.patch
+@@ -0,0 +1,27 @@
++--- a/include/dahdi/kernel.h
+++++ b/include/dahdi/kernel.h
++@@ -59,0 +60,7 @@
+++#include <linux/hrtimer.h>
+++
+++/* del_timer[_sync] was renamed to timer_delete[_sync] in newer kernels. */
+++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
+++#define del_timer timer_delete
+++#define del_timer_sync timer_delete_sync
+++#endif
++@@ -67,0 +75,16 @@
+++
+++/* Recreate hrtimer_init using the modern hrtimer_setup API. */
+++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 8, 0)
+++static inline void hrtimer_init(struct hrtimer *timer,
+++                                clockid_t clock_id,
+++                                enum hrtimer_mode mode)
+++{
+++    hrtimer_setup(timer, NULL, clock_id, mode);
+++}
+++#endif
+++
+++/* Restore from_timer for DAHDI sources on newer kernels. */
+++#ifndef from_timer
+++#define from_timer(var, callback_timer, timer_fieldname) \
+++        container_of(callback_timer, typeof(*var), timer_fieldname)
+++#endif
+diff --git a/libs/dahdi-linux/patches/211-Kbuild-Use-ccflag-y.patch b/libs/dahdi-linux/patches/211-Kbuild-Use-ccflag-y.patch
+new file mode 100644
+index 0000000..88e9b05
+--- /dev/null
++++ b/libs/dahdi-linux/patches/211-Kbuild-Use-ccflag-y.patch
+@@ -0,0 +1,79 @@
++--- a/drivers/dahdi/Kbuild
+++++ b/drivers/dahdi/Kbuild
++@@ -86,1 +86,1 @@
++-EXTRA_CFLAGS+=-Drw_lock_t=rwlock_t
+++ccflags-y+=-Drw_lock_t=rwlock_t
++@@ -92,1 +92,1 @@
++-EXTRA_CFLAGS+=-DHAVE_HRTIMER_ACCESSORS=1
+++ccflags-y+=-DHAVE_HRTIMER_ACCESSORS=1
++--- a/drivers/dahdi/oct612x/Kbuild
+++++ b/drivers/dahdi/oct612x/Kbuild
++@@ -30,1 +30,1 @@
++-EXTRA_CFLAGS = -I$(src)/.. -Wno-undef -I$(src)/include -I$(src)/octdeviceapi -I$(src)/octdeviceapi/oct6100api
+++ccflags-y := -I$(src)/.. -Wno-undef -I$(src)/include -I$(src)/octdeviceapi -I$(src)/octdeviceapi/oct6100api
++--- a/drivers/dahdi/oct612x/Makefile
+++++ b/drivers/dahdi/oct612x/Makefile
++@@ -29,1 +29,1 @@
++-EXTRA_CFLAGS = -I$(src)/.. -Wno-undef -I$(src)/include -I$(src)/octdeviceapi -I$(src)/octdeviceapi/oct6100api
+++ccflags-y := -I$(src)/.. -Wno-undef -I$(src)/include -I$(src)/octdeviceapi -I$(src)/octdeviceapi/oct6100api
++--- a/drivers/dahdi/opvxa1200/Kbuild
+++++ b/drivers/dahdi/opvxa1200/Kbuild
++@@ -3,1 +3,1 @@
++-EXTRA_CFLAGS += -I$(src)/.. -Wno-undef -Wno-error=unused-variable
+++ccflags-y += -I$(src)/.. -Wno-undef -Wno-error=unused-variable
++@@ -13,1 +13,1 @@
++-                EXTRA_CFLAGS+=-DDAHDI_SPAN_MODULE
+++                ccflags-y+=-DDAHDI_SPAN_MODULE
++@@ -16,1 +16,1 @@
++-                        EXTRA_CFLAGS+=-DDAHDI_SPAN_OPS
+++                        ccflags-y+=-DDAHDI_SPAN_OPS
++--- a/drivers/dahdi/voicebus/Kbuild
+++++ b/drivers/dahdi/voicebus/Kbuild
++@@ -11,1 +11,1 @@
++-  EXTRA_CFLAGS+=-DHOTPLUG_FIRMWARE
+++  ccflags-y+=-DHOTPLUG_FIRMWARE
++@@ -14,1 +14,1 @@
++-EXTRA_CFLAGS += -I$(src)/.. -Wno-undef
+++ccflags-y += -I$(src)/.. -Wno-undef
++--- a/drivers/dahdi/wcb4xxp/Kbuild
+++++ b/drivers/dahdi/wcb4xxp/Kbuild
++@@ -3,1 +3,1 @@
++-EXTRA_CFLAGS += -I$(src)/.. -Wno-undef
+++ccflags-y += -I$(src)/.. -Wno-undef
++--- a/drivers/dahdi/wct4xxp/Kbuild
+++++ b/drivers/dahdi/wct4xxp/Kbuild
++@@ -5,1 +5,1 @@
++-EXTRA_CFLAGS += -I$(src)/.. -I$(src)/../oct612x/ $(shell $(src)/../oct612x/octasic-helper cflags $(src)/../oct612x) -Wno-undef
+++ccflags-y += -I$(src)/.. -I$(src)/../oct612x/ $(shell $(src)/../oct612x/octasic-helper cflags $(src)/../oct612x) -Wno-undef
++@@ -11,1 +11,1 @@
++-EXTRA_CFLAGS += $(call cc-option, -Wno-unused-but-set-variable)
+++ccflags-y += $(call cc-option, -Wno-unused-but-set-variable)
++@@ -14,1 +14,1 @@
++-  EXTRA_CFLAGS+=-DHOTPLUG_FIRMWARE
+++  ccflags-y+=-DHOTPLUG_FIRMWARE
++--- a/drivers/dahdi/wctc4xxp/Kbuild
+++++ b/drivers/dahdi/wctc4xxp/Kbuild
++@@ -5,1 +5,1 @@
++-EXTRA_CFLAGS += -I$(src)/.. -Wno-undef
+++ccflags-y += -I$(src)/.. -Wno-undef
++@@ -8,1 +8,1 @@
++-  EXTRA_CFLAGS+=-DHOTPLUG_FIRMWARE
+++  ccflags-y+=-DHOTPLUG_FIRMWARE
++--- a/drivers/dahdi/wctdm24xxp/Kbuild
+++++ b/drivers/dahdi/wctdm24xxp/Kbuild
++@@ -3,1 +3,1 @@
++-EXTRA_CFLAGS += -I$(src)/.. -Wno-undef
+++ccflags-y += -I$(src)/.. -Wno-undef
++--- a/drivers/dahdi/wcte12xp/Kbuild
+++++ b/drivers/dahdi/wcte12xp/Kbuild
++@@ -3,1 +3,1 @@
++-EXTRA_CFLAGS += -I$(src)/.. -Wno-undef
+++ccflags-y += -I$(src)/.. -Wno-undef
++--- a/drivers/dahdi/xpp/Kbuild
+++++ b/drivers/dahdi/xpp/Kbuild
++@@ -1,1 +1,1 @@
++-EXTRA_CFLAGS	=	$(XPP_LOCAL_CFLAGS)	\
+++ccflags-y	=	$(XPP_LOCAL_CFLAGS)	\
++@@ -35,1 +35,1 @@
++-EXTRA_CFLAGS	+= -DDEBUG_SYNC_PARPORT
+++ccflags-y	+= -DDEBUG_SYNC_PARPORT
+-- 
+2.55.0
+
