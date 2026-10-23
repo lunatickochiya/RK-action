@@ -4,15 +4,27 @@
 # 输出一行一个 KEY=VALUE，供 11_sysinfo.js 解析。
 # 数据全部来自本机脚本/内核接口，不依赖 luci 补丁提供的 RPC。
 
+# 更新间隔状态：CPU/GPU 计数器需要两次采样才能算出区间占用率，
+# VPU 解码帧率由 rkvdec 中断计数差值估算。文件放 /tmp（重启即清空）。
+STATE_FILE="/tmp/.autoset-sysinfo.state"
+
 # 多行输出压成一行，避免破坏 KEY=VALUE 格式
 one_line() {
 	tr '\n' ' ' | sed -e 's/  */ /g' -e 's/^ //' -e 's/ $//'
 }
 
+rd() { cat "$1" 2>/dev/null; }
+
 # 固件编译时间（Unix 时间戳）：OpenWrt 24.10+ 在 os-release 里提供
 builddate="$(sed -n 's/^OPENWRT_BUILD_DATE=//p' /usr/lib/os-release /etc/os-release 2>"/dev/null" | tr -d '"' | head -n1)"
 
-# CPU 型号 / 核心数 / 频率 / 温度
+# ---------------------------------------------------------------- CPU
+# 总 jiffies / idle+iowait，用于计算两次采样之间的 CPU 使用率
+set -- $(awk '/^cpu / { t = $2 + $3 + $4 + $5 + $6 + $7 + $8; print t, $5 + $6 }' /proc/stat 2>"/dev/null")
+cpu_total="${1:-0}"
+cpu_idle="${2:-0}"
+
+# CPU 型号 / 核心数 / 当前频率 / 温度（沿用现有 cpuinfo）
 cpuinfo=""
 [ -x /sbin/cpuinfo ] && cpuinfo="$(/sbin/cpuinfo 2>"/dev/null" | one_line)"
 if [ -z "$cpuinfo" ]; then
@@ -22,21 +34,162 @@ if [ -z "$cpuinfo" ]; then
 	cpuinfo="${arch} x ${cores:-1}"
 fi
 
-# 温度（CPU / WiFi / PON 等）
-tempinfo=""
-[ -x /sbin/tempinfo ] && tempinfo="$(/sbin/tempinfo 2>"/dev/null" | one_line)"
+# CPU 调频策略 / 频率范围（大小核分别列出）
+cpufreq=""
+for p in /sys/devices/system/cpu/cpufreq/policy*; do
+	[ -d "$p" ] || continue
+	gov="$(rd "$p/scaling_governor")"
+	min="$(rd "$p/scaling_min_freq")"
+	max="$(rd "$p/scaling_max_freq")"
+	case "$min$max" in ''|*[!0-9]*) continue ;; esac
+	[ -n "$gov" ] || gov="?"
+	cpufreq="${cpufreq:+$cpufreq / }${gov} $((min / 1000))-$((max / 1000))MHz"
+done
+
+# ---------------------------------------------------------------- GPU
+# Mali 累计 busy/idle 计数器：
+#   厂商 kbase: /sys/kernel/debug/mali0/dvfs_utilization
+#   主线 Panfrost: 平台 sysfs 的 dvfs_utilization（本仓库 6.6 分支补丁暴露）
+gpu_busy=""
+gpu_idle=""
+for f in /sys/kernel/debug/mali0/dvfs_utilization \
+         /sys/devices/platform/*.gpu/dvfs_utilization; do
+	[ -r "$f" ] || continue
+	gpu_busy="$(sed -n 's/.*busy_time:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$f" 2>"/dev/null" | head -n1)"
+	gpu_idle="$(sed -n 's/.*idle_time:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$f" 2>"/dev/null" | head -n1)"
+	break
+done
+
+# GPU 频率：devfreq 优先，其次 debugfs 时钟
+gpufreq=""
+for f in /sys/class/devfreq/*gpu*/cur_freq \
+         /sys/devices/platform/*.gpu/devfreq/*/cur_freq \
+         /sys/devices/platform/*.gpu-panthor/devfreq/*/cur_freq; do
+	[ -r "$f" ] || continue
+	v="$(rd "$f")"
+	case "$v" in ''|*[!0-9]*) continue ;; esac
+	gpufreq="$((v / 1000000))"
+	break
+done
+if [ -z "$gpufreq" ]; then
+	for f in /sys/kernel/debug/clk/clk_gpu/clk_rate \
+	         /sys/kernel/debug/clk/clk_gpu_core/clk_rate; do
+		[ -r "$f" ] || continue
+		v="$(rd "$f")"
+		case "$v" in ''|*[!0-9]*) continue ;; esac
+		gpufreq="$((v / 1000000))"
+		break
+	done
+fi
+
+# GPU 驱动是否已加载：无驱动时平台节点存在也读不到占用率
+gpu_avail=0
+[ -e /dev/mali0 ] && gpu_avail=1
+[ -d /sys/kernel/debug/mali0 ] && gpu_avail=1
+for d in /sys/class/devfreq/*gpu*; do
+	[ -d "$d" ] && gpu_avail=1
+done
+for f in /sys/devices/platform/*.gpu/driver /sys/devices/platform/*.gpu-panthor/driver; do
+	[ -e "$f" ] && gpu_avail=1
+done
+
+# ---------------------------------------------------------------- VPU
+# rkvdec 中断计数：每帧一次中断，用两次采样的差值估算解码帧率
+irq_total=0
+irq_seen=0
+while IFS= read -r line; do
+	[ -n "$line" ] || continue
+	irq_seen=1
+	n="$(printf '%s\n' "$line" | awk '{ n = 0; for (i = 2; i <= NF; i++) { if ($i ~ /^[0-9]+$/) n += $i; else break } print n }')"
+	irq_total=$((irq_total + ${n:-0}))
+done <<EOF
+$(grep -E 'rkvdec|vdpu|vdec' /proc/interrupts 2>"/dev/null")
+EOF
+
+vpu_avail=0
+[ -d /proc/mpp_service ] && vpu_avail=1
+
+# 编码会话：优先读每个编码核的 sessions-info，避免和 sessions-summary 重复
+enc_avail=0
+enc_data=""
+for f in /proc/mpp_service/vepu/sessions-info \
+         /proc/mpp_service/rkvenc-core*/sessions-info; do
+	[ -r "$f" ] || continue
+	enc_avail=1
+	enc_data="$enc_data$(cat "$f" 2>"/dev/null")"
+done
+if [ "$enc_avail" = "0" ] && [ -r /proc/mpp_service/sessions-summary ]; then
+	enc_avail=1
+	enc_data="$(cat /proc/mpp_service/sessions-summary 2>"/dev/null")"
+fi
+
+vpu_enc=""
+if [ "$enc_avail" = "1" ]; then
+	vpu_enc="$(printf '%s\n' "$enc_data" | awk -F'|' '
+		/^\| *[0-9]+ *\|/ {
+			for (i = 1; i <= NF; i++) {
+				gsub(/^[ \t]+/, "", $i)
+				gsub(/[ \t]+$/, "", $i)
+			}
+			n++
+			if (n == 1) {
+				first = $6 " " $4 "x" $5
+				if ($7 != "" && $7 != "0")
+					first = first "@" $7
+			}
+			if ($10 ~ /^[0-9]+$/)
+				total_br += $10
+		}
+		END {
+			if (n == 0) { print "空闲"; exit }
+			if (n == 1)
+				printf "%d 路 %s · %.1f Mbps\n", n, first, total_br / 1000000
+			else
+				printf "%d 路 · 合计 %.1f Mbps\n", n, total_br / 1000000
+		}
+	')"
+fi
+
+# ---------------------------------------------------------------- 温度
+# 复用 /sbin/tempinfo（CPU/WiFi/PON），再补充 GPU/VPU/NPU 等 thermal zone
+tempinfo="$(/sbin/tempinfo 2>"/dev/null")"
+[ "$tempinfo" = "No temperature info" ] && tempinfo=""
+
+add_temp() {
+	label="$1"
+	value="$2"
+	[ -n "$value" ] || return 0
+	case "$tempinfo" in
+		*"$label:"*) return 0 ;;
+	esac
+	tempinfo="${tempinfo:+$tempinfo, }$label: $value"
+}
+
+for z in /sys/class/thermal/thermal_zone*; do
+	[ -r "$z/temp" ] || continue
+	zt="$(rd "$z/type")"
+	case "$zt" in
+		cpu-thermal|soc-thermal) label="CPU" ;;
+		gpu-thermal) label="GPU" ;;
+		npu-thermal) label="NPU" ;;
+		vpu-thermal|vdec-thermal|venc-thermal) label="VPU" ;;
+		bigcore0-thermal) label="Big0" ;;
+		bigcore1-thermal) label="Big1" ;;
+		bigcore2-thermal) label="Big2" ;;
+		littlecore-thermal) label="Little" ;;
+		center-thermal) label="Center" ;;
+		package-thermal) label="SoC" ;;
+		*) continue ;;
+	esac
+	val="$(awk '{ printf("%.1f°C", $0 / 1000) }' "$z/temp" 2>"/dev/null")"
+	add_temp "$label" "$val"
+done
+
 if [ -z "$tempinfo" ] && [ -r /sys/class/thermal/thermal_zone0/temp ]; then
-	tempinfo="CPU: $(awk '{printf("%.1f°C", $0 / 1000)}' /sys/class/thermal/thermal_zone0/temp)"
+	tempinfo="CPU: $(awk '{ printf("%.1f°C", $0 / 1000) }' /sys/class/thermal/thermal_zone0/temp)"
 fi
 
-# 使用率（qualcommax 带 NPU/ECM，mediatek/airoha 带 PPE 统计）
-usage=""
-[ -x /sbin/usage ] && usage="$(/sbin/usage 2>"/dev/null" | one_line)"
-if [ -z "$usage" ]; then
-	usage="CPU: $(busybox top -n1 2>"/dev/null" | awk '/^CPU/ {printf("%d%%", 100 - $8)}')"
-fi
-
-# 在线用户数：LAN 上 ARP 可达的条目
+# ---------------------------------------------------------------- 用户 / 进程
 lan_dev=""
 if [ -x /usr/bin/jsonfilter ]; then
 	lan_dev="$(ubus call network.interface.lan status 2>"/dev/null" | /usr/bin/jsonfilter -e '@.l3_device' 2>"/dev/null")"
@@ -50,14 +203,97 @@ else
 	users="$(awk 'NR > 1 && $3 == "0x2" { n++ } END { print n + 0 }' /proc/net/arp 2>"/dev/null")"
 fi
 
+tasks="$(cut -d' ' -f4 /proc/loadavg 2>"/dev/null")"
+
 # CPU 跑分（CpuMark）
 cpubench=""
 [ -r /etc/bench.log ] && \
 	cpubench="$(sed -n 's/.*CpuMark[^0-9]*\([0-9.]\{1,\}\).*/\1/p' /etc/bench.log 2>"/dev/null" | head -n1)"
 
+# ---------------------------------------------------------------- 区间统计
+now="$(date +%s 2>"/dev/null")"
+[ -n "$now" ] || now=0
+
+prev_cpu_total=0 prev_cpu_idle=0 prev_irq=0 prev_gpu_busy=0 prev_gpu_idle=0 prev_ts=0
+[ -r "$STATE_FILE" ] && read prev_cpu_total prev_cpu_idle prev_irq prev_gpu_busy prev_gpu_idle prev_ts < "$STATE_FILE" 2>"/dev/null"
+
+# 有 /sbin/usage 的平台沿用其 NPU/PPE 统计，没有则用 CPU jiffies 区间值
+usage=""
+[ -x /sbin/usage ] && usage="$(/sbin/usage 2>"/dev/null" | one_line)"
+if [ -z "$usage" ]; then
+	if [ "${prev_cpu_total:-0}" -gt 0 ] && [ "$cpu_total" -gt "$prev_cpu_total" ]; then
+		d_total=$((cpu_total - prev_cpu_total))
+		d_idle=$((cpu_idle - prev_cpu_idle))
+		[ "$d_idle" -lt 0 ] && d_idle=0
+		cpu_pct=$((100 - d_idle * 100 / d_total))
+		[ "$cpu_pct" -lt 0 ] && cpu_pct=0
+		[ "$cpu_pct" -gt 100 ] && cpu_pct=100
+		usage="CPU: ${cpu_pct}%"
+	else
+		usage="CPU: $(busybox top -n1 2>"/dev/null" | awk '/^CPU/ { printf("%d%%", 100 - $8) }')"
+	fi
+fi
+
+gpuload=""
+if [ -n "$gpu_busy" ] && [ -n "$gpu_idle" ]; then
+	if [ "${prev_gpu_busy:-0}" -gt 0 ] || [ "${prev_gpu_idle:-0}" -gt 0 ]; then
+		d_busy=$((gpu_busy - prev_gpu_busy))
+		d_idle=$((gpu_idle - prev_gpu_idle))
+		[ "$d_busy" -lt 0 ] && d_busy=0
+		[ "$d_idle" -lt 0 ] && d_idle=0
+		if [ $((d_busy + d_idle)) -gt 0 ]; then
+			gpuload=$((d_busy * 100 / (d_busy + d_idle)))
+		fi
+	else
+		if [ $((gpu_busy + gpu_idle)) -gt 0 ]; then
+			gpuload=$((gpu_busy * 100 / (gpu_busy + gpu_idle)))
+		fi
+	fi
+else
+	for f in /sys/class/devfreq/*gpu*/load /sys/devices/platform/*.gpu/devfreq/*/load; do
+		[ -r "$f" ] || continue
+		v="$(rd "$f")"
+		v="${v%%@*}"
+		v="${v%%\%*}"
+		v="$(printf '%s' "$v" | tr -cd '0-9')"
+		[ -n "$v" ] && gpuload="$v"
+		break
+	done
+fi
+[ -n "$gpuload" ] && { [ "$gpuload" -lt 0 ] && gpuload=0; [ "$gpuload" -gt 100 ] && gpuload=100; }
+
+vpu_dec=""
+if [ "$vpu_avail" = "1" ] && [ "$irq_seen" = "1" ] && [ "${prev_ts:-0}" -gt 0 ] && [ "$now" -gt "$prev_ts" ]; then
+	d_irq=$((irq_total - prev_irq))
+	d_sec=$((now - prev_ts))
+	[ "$d_irq" -lt 0 ] && d_irq=0
+	if [ "$d_sec" -gt 0 ]; then
+		fps=$(( (d_irq + d_sec / 2) / d_sec ))
+		if [ "$fps" -gt 0 ]; then
+			vpu_dec="约 ${fps} fps"
+		else
+			vpu_dec="空闲"
+		fi
+	fi
+fi
+
+# 保存本次采样，供下次计算区间值
+printf '%s %s %s %s %s %s\n' \
+	"$cpu_total" "$cpu_idle" "$irq_total" \
+	"${gpu_busy:-0}" "${gpu_idle:-0}" "$now" > "$STATE_FILE" 2>"/dev/null"
+
+# ---------------------------------------------------------------- 输出
 printf 'BUILDDATE=%s\n' "$builddate"
 printf 'CPUINFO=%s\n' "$cpuinfo"
+printf 'CPUFREQ=%s\n' "$cpufreq"
 printf 'TEMPINFO=%s\n' "$tempinfo"
 printf 'USAGE=%s\n' "$usage"
+printf 'GPUAVAIL=%s\n' "$gpu_avail"
+printf 'GPULOAD=%s\n' "$gpuload"
+printf 'GPUFREQ=%s\n' "$gpufreq"
+printf 'VPUAVAIL=%s\n' "$vpu_avail"
+printf 'VPUDEC=%s\n' "$vpu_dec"
+printf 'VPUENC=%s\n' "$vpu_enc"
+printf 'TASKS=%s\n' "$tasks"
 printf 'USERS=%s\n' "$users"
 printf 'CPUBENCH=%s\n' "$cpubench"

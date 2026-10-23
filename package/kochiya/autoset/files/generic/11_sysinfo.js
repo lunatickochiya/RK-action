@@ -55,6 +55,33 @@ function row(label, valueEl) {
 	]);
 }
 
+/* GPU：占用率来自 Mali kbase 的 busy/idle 计数（区间值），
+ * 没有百分比时退回 devfreq load；驱动未加载时明确提示。 */
+function gpuText(kv) {
+	if (kv.GPUAVAIL === '0')
+		return '—（未启用 GPU 驱动）';
+
+	if (kv.GPULOAD == null || kv.GPULOAD === '')
+		return '—';
+
+	return kv.GPULOAD + '%' + (kv.GPUFREQ ? ' · ' + kv.GPUFREQ + ' MHz' : '');
+}
+
+/* VPU：解码帧率由 rkvdec 中断差值估算，编码读 MPP 会话表 */
+function vpuDecText(kv) {
+	if (kv.VPUAVAIL === '0')
+		return '—';
+
+	return kv.VPUDEC || '—';
+}
+
+function vpuEncText(kv) {
+	if (kv.VPUAVAIL === '0')
+		return '—';
+
+	return kv.VPUENC || '—';
+}
+
 function sourceRow() {
 	return row('源代码', E('span', {}, [
 		E('a', {
@@ -90,8 +117,13 @@ return baseclass.extend({
 		return E('table', { 'class': 'table' }, [
 			row('固件编译时间', E('span', {}, fmtBuildDate(kv.BUILDDATE))),
 			row('CPU 信息', text(kv.CPUINFO)),
+			row('CPU 调频', text(kv.CPUFREQ)),
 			row('温度', text(kv.TEMPINFO)),
 			row('使用率', text(kv.USAGE)),
+			row('GPU 使用率', text(gpuText(kv))),
+			row('VPU 解码', text(vpuDecText(kv))),
+			row('VPU 编码', text(vpuEncText(kv))),
+			row('进程/线程', text(kv.TASKS)),
 			row('在线用户', text(kv.USERS)),
 			row('CPU 跑分', E('span', {}, isFinite(cpumark) ? ('CpuMark ' + cpumark.toFixed(1) + ' 分') : '—')),
 			sourceRow()
