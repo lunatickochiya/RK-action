@@ -723,7 +723,7 @@ function add_openwrt_kmods() {
 	fi
 
 	fix_openwrt_config_eror
-	make defconfig
+	cd openwrt && make defconfig && cd ../
 }
 
 function awk_openwrt_config() {
