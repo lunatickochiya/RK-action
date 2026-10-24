@@ -67,6 +67,31 @@ jobs:
           restore-keys: rockchip-nftables_eBPF-cache-openwrt-
           lookup-only: true
 
+      # ---- 预编译工具链（build-toolchain-cache，工具链缓存只剩这一份）----
+      - name: Touch toolchain 6.6
+        id: tc66
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            staging_dir/host*
+            staging_dir/tool*
+          key: tc-openwrt-2512-rk-cache-openwrt-
+          restore-keys: tc-openwrt-2512-rk-cache-openwrt-
+          lookup-only: true
+
+      - name: Touch toolchain 6.18
+        id: tc618
+        continue-on-error: true
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            staging_dir/host*
+            staging_dir/tool*
+          key: tc-openwrt-2512-618-rk-cache-openwrt-
+          restore-keys: tc-openwrt-2512-618-rk-cache-openwrt-
+          lookup-only: true
+
       # ---- 25.12 rockchip + Linux 6.18（build-rockchip-2512-618，含 eBPF 变体）----
       - name: Touch 618-rockchip-iptables
         id: rk618-ipt
@@ -123,6 +148,8 @@ jobs:
       - name: Summary
         run: |
           echo "matched cache keys:"
+          echo "  toolchain 6.6           : ${{ steps.tc66.outputs.cache-matched-key }}"
+          echo "  toolchain 6.18          : ${{ steps.tc618.outputs.cache-matched-key }}"
           echo "  rockchip-iptables       : ${{ steps.rk-ipt.outputs.cache-matched-key }}"
           echo "  rockchip-nftables       : ${{ steps.rk-nft.outputs.cache-matched-key }}"
           echo "  rockchip-iptables_eBPF  : ${{ steps.rk-ipt-ebpf.outputs.cache-matched-key }}"

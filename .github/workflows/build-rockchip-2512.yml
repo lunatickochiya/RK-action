@@ -294,15 +294,49 @@ jobs:
         make download -j$(nproc) || true
         find dl -size -1024c -exec rm -f {} \;
 
+    - name: 恢复工具链（Actions 缓存）
+      # 由 build-toolchain-cache.yml 预先编好并缓存（key 里带 tools/toolchain 的 git hash），
+      # 命中时 fetch 会顺手改 Makefile 跳过工具链编译。
+      id: tc_cache
+      if: env.Cache == '1' && !cancelled()
+      uses: lunatickochiya/cachewrtbuild@save-on-failure
+      with:
+        ccache: 'false'
+        toolchain: 'true'
+        skip: 'true'
+        mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}
+        prefix: ${{ github.workspace }}/openwrt
+        skip_saving: 'true'
+
+    - name: 恢复工具链（Release 兜底）
+      # 缓存未命中（过期/被清理/首次）时，从 Release 的 toolchain-cache 拉同名 asset。
+      # asset 名带 tools/toolchain 的 git hash，hash 不一致就跳过，避免用错版本。
+      if: steps.tc_cache.outputs.hit != '1'
+      working-directory: ./openwrt
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        command -v zstd >/dev/null || sudo apt-get install -y -qq zstd
+        TC_HASH=$(git log --pretty=tformat:"%h" -n1 tools toolchain)
+        ASSET="toolchain-${OpenWrt_PATCH_FILE_DIR}-${TC_HASH}.tar.zst"
+        if gh release download toolchain-cache -p "$ASSET" -D /tmp --clobber 2>/dev/null; then
+          echo "从 Release 恢复工具链：$ASSET"
+          tar --zstd -xf "/tmp/$ASSET" -C .
+          sed -i 's/ $(tool.*\/stamp-compile)//;' Makefile
+          sed -i 's/ $(tool.*\/stamp-install)//;' Makefile
+        else
+          echo "::notice ::未找到 $ASSET，本次现场编译工具链（可先跑 Build Toolchain Cache workflow）"
+        fi
+
     - name: 缓存staging
-      # fork（lunatickochiya/cachewrtbuild@save-on-failure）：config_repo 的
-      # CacheSaveOnFailure（默认 "true"）由 core.sh 导出成 env CACHEWRT_SAVE_ON_FAILURE，
-      # fork 的 post-if 读它 —— 编译失败也执行 post 保存，这样 tools/toolchain 编完后
-      # 即使后面包编译/打包失败，缓存也不会白编。
+      # 工具链由 build-toolchain-cache.yml 单独缓存/发布（见上面的恢复步骤），
+      # 这里只缓存 .ccache（toolchain: 'false'）。fork 的 post-if 读 env
+      # CACHEWRT_SAVE_ON_FAILURE，编译失败也会保存 ccache。
       uses: lunatickochiya/cachewrtbuild@save-on-failure
       if: env.Cache == '1' && !cancelled()
       with:
         ccache: 'true'
+        toolchain: 'false'
         mixkey: ${{ matrix.target }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
         skip_saving: ${{ env.CacheSave }}

@@ -28,7 +28,8 @@
 
 - `build-rockchip-2512.yml`：25.12 + Linux **6.6** 机型构建（iptables / nftables 各一份）
 - `build-rockchip-2512-618.yml`：25.12 + Linux **6.18** 机型构建（iptables / nftables 各一份）
-- `cache-keepalive.yml`：每 5 天触碰一次缓存 key，避免被回收（6.6 / 6.18 两套 key）
+- `build-toolchain-cache.yml`：只编译 tools + toolchain，存 Actions 缓存与 Release（机型构建前恢复）
+- `cache-keepalive.yml`：每 5 天触碰一次缓存 key，避免被回收（6.6 / 6.18 两套 key + 工具链 key）
 - `secret-check.yml`：验证 `MY_SECRET_TOKEN` 能否克隆私有源码仓库（6.6 / 6.18 两个分支）
 
 在 Actions 页面按需选择 `Build Rockchip 25.12` 或 `Build Rockchip 25.12 (Linux 6.18)`，
@@ -36,30 +37,33 @@
 
 ## 缓存（tools / toolchain / ccache）
 
-两个 `build-rockchip-2512*.yml` 都用 fork 的 `lunatickochiya/cachewrtbuild@save-on-failure` 缓存
-`staging_dir/host*`（tools）、`staging_dir/tool*`（toolchain）与 `.ccache`，
-key 为 `<mixkey>-cache-openwrt-<工具链hash>`（6.6 的 mixkey = `rockchip-iptables` /
-`rockchip-nftables`，6.18 的 mixkey = `618-rockchip-iptables` / `618-rockchip-nftables`；
-eBPF 变体再追加 `_eBPF`）：
+工具链不再按机型各存一份，而是由独立的 `build-toolchain-cache.yml` 预编译：
 
-- **命中时**：直接复用工具链、跳过 tools/toolchain 编译（`skip` 默认 true）；
-- **保存**：在 job 结束时由 action 的 post 步骤完成；
-- 因为 key 里带源码树 `tools/`/`toolchain/` 的 hash，这两处有改动后会自然换 key（旧缓存仍可被
-  `cache-keepalive` 保住，但不会命中）。
+- 手动选内核画像（6.6 / 6.18）跑一次，或每周日自动刷新一次；
+- 产物同时放两处：
+  1. Actions 缓存：`tc-<画像>-cache-openwrt-<工具链hash>`（`staging_dir/host*` + `staging_dir/tool*`）；
+  2. Release `toolchain-cache` 的 asset：`toolchain-<画像>-<工具链hash>.tar.zst`；
+- 两个 `build-rockchip-2512*.yml` 在编译前恢复：**Actions 缓存优先，未命中再从 Release 下载解压**，
+  并自动改 `Makefile` 跳过 tools/toolchain 编译（省 40~70 分钟）。
 
-两个相关选项都在 `config_repo`（json）里，默认值：
+`build-rockchip-2512*.yml` 里原来的 `cachewrtbuild` 步骤现在只缓存 `.ccache`
+（`toolchain: 'false'`），key 仍按机型区分：
+`<mixkey>-cache-openwrt-<timestamp>`（6.6：`rockchip-iptables` / `rockchip-nftables`；
+6.18：`618-rockchip-iptables` / `618-rockchip-nftables`；eBPF 变体再追加 `_eBPF`）。
+因为不再缓存工具链，ccache key 里也就不带工具链 hash 了。
+
+> 之前工具链缓存一直不生效的原因：缓存由 action 的 post 步骤保存，而 6 小时超时的 job 是
+> `cancelled` 而不是 `failure`，`post-if` 不成立 —— 工具链缓存其实从未写进去过。
+> 现在由独立的工具链工作流正常结束后保存/上传，不再受主构建超时影响。
+
+`config_repo`（json）里与缓存相关的选项仍然有效，默认值：
 `{"Cache": "1", "CacheSave": "false", "CacheSaveOnFailure": "true", ...}`
 
 | 键 | 默认 | 含义 |
 |---|---|---|
 | `Cache` | `"1"` | 是否启用缓存步骤（0 则整段跳过） |
 | `CacheSave` | `"false"` | 传给 action 的 `skip_saving`：**默认 `"false"` = 保存**；设 `"true"` 则只读不写（命名沿用 autoset） |
-| `CacheSaveOnFailure` | `"true"` | `core.sh` 导出成 env `CACHEWRT_SAVE_ON_FAILURE`，fork 的 `post-if` 读它：**`"true"` 时编译失败也执行 post 保存**（避免 tools/toolchain 编完后因后续包编译/打包失败而白编）；`"false"` 恢复上游“只在 job 成功时保存”的行为 |
-
-> 注：`post-if` 里读不到 action 的 `with:` 输入，所以这个开关只能走 env
-> （`core.sh` 写 `$GITHUB_ENV` 即可，实测 job 失败仍会执行 post 并写入缓存）。
-> fork 改动仅 action.yml 的 post-if 条件 + save.js 一行 debug，可随时合并回 `main`
-> 后把工作流改回 `HiGarfield/cachewrtbuild@main`。
+| `CacheSaveOnFailure` | `"true"` | `core.sh` 导出成 env `CACHEWRT_SAVE_ON_FAILURE`，fork 的 `post-if` 读它：编译失败也执行 post 保存 |
 
 ## 支持设备
 
