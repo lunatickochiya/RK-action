@@ -39,7 +39,7 @@
 
 工具链不再按机型各存一份，而是由独立的 `build-toolchain-cache.yml` 预编译：
 
-- 手动选内核画像（6.6 / 6.18）跑一次，或每周日自动刷新一次；
+- 只在 Actions 里**手动**选内核画像（6.6 / 6.18）跑一次，不会自动触发；
 - 产物同时放两处：
   1. Actions 缓存：`tc-<画像>-cache-openwrt-<工具链hash>`（`staging_dir/host*` + `staging_dir/tool*`）；
   2. Release `toolchain-cache` 的 asset：`toolchain-<画像>-<工具链hash>.tar.zst`；

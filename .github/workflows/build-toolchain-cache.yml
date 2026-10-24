@@ -7,8 +7,8 @@ name: Build Toolchain Cache (Rockchip)
 # 省掉每次从零编 gcc/binutils/musl + host tools 的 40~70 分钟。
 #
 # 用法：
-#   - 手动跑：选内核画像（openwrt-2512-618-rk / openwrt-2512-rk）
-#   - 每周日自动跑一次，保证 Actions 缓存不过期（Release asset 不过期）
+#   - 只在 Actions 里手动触发（Run workflow），选内核画像
+#     （openwrt-2512-618-rk / openwrt-2512-rk），不会自动运行
 
 permissions:
   contents: write
@@ -37,8 +37,6 @@ on:
         - 'mpc1917_lite'
         - 'fmx1_pro'
         - 'shimeta_aiot3588a'
-  schedule:
-    - cron: '0 18 * * 0'
 
 env:
   TZ: Asia/Shanghai
@@ -48,14 +46,9 @@ jobs:
   toolchain:
     runs-on: ubuntu-24.04
     timeout-minutes: 330
-    strategy:
-      fail-fast: false
-      # 手动触发只编所选画像；定时触发两个画像都刷新
-      matrix:
-        patch_dir: ${{ (github.event_name == 'workflow_dispatch') && fromJSON(format('["{0}"]', github.event.inputs.patch_dir)) || fromJSON('["openwrt-2512-618-rk", "openwrt-2512-rk"]') }}
-    name: Toolchain ${{ matrix.patch_dir }}
+    name: Toolchain ${{ github.event.inputs.patch_dir }}
     env:
-      OpenWrt_PATCH_FILE_DIR: ${{ matrix.patch_dir }}
+      OpenWrt_PATCH_FILE_DIR: ${{ github.event.inputs.patch_dir }}
       Matrix_Target: rockchip-nftables
       Target_CFG_Machine: ${{ github.event.inputs.machine || 'ztl-joyrock' }}
       SFE_INPUT_STATUS: 'false'
