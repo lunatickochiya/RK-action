@@ -723,7 +723,7 @@ function add_openwrt_kmods() {
 	fi
 
 	fix_openwrt_config_eror
-
+	make defconfig
 }
 
 function awk_openwrt_config() {
@@ -778,7 +778,7 @@ elif [ "$1" == "add-openwrt-kmods" ]; then
 add_openwrt_kmods
 elif [ "$1" == "fix-openwrt-feeds" ]; then
 fix_openwrt_feeds
-refine_openwrt_config
+#refine_openwrt_config
 elif [ "$1" == "awk-openwrt-config" ]; then
 awk_openwrt_config
 else
