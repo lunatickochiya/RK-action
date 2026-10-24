@@ -246,6 +246,11 @@ jobs:
       id: config
       run: |
         $GITHUB_WORKSPACE/core.sh fix-openwrt-feeds
+        cd openwrt
+        rm -rf feeds/telephony.index
+        ./scripts/feeds update telephony
+        ./scripts/feeds install -a
+        cd ../
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: 添加kmod
