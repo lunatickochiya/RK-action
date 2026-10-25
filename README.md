@@ -41,8 +41,10 @@
 
 - 只在 Actions 里**手动**选内核画像（6.6 / 6.18）跑一次，不会自动触发；
 - 产物同时放两处：
-  1. Actions 缓存：`tc-<画像>-cache-openwrt-<工具链hash>`（`staging_dir/host*` + `staging_dir/tool*`）；
-  2. Release `toolchain-cache` 的 asset：`toolchain-<画像>-<工具链hash>.tar.zst`；
+  1. Actions 缓存：`tc-<画像>[_eBPF]-cache-openwrt-<工具链hash>`（`staging_dir/host*` + `staging_dir/tool*`）；
+  2. Release `toolchain-cache` 的 asset：`toolchain-<画像>[_eBPF]-<工具链hash>.tar.zst`；
+- 工作流带 **eBPF 开关**：开 eBPF 时会多编 host bpftool，所以 eBPF / 非 eBPF 各存一份；
+  机型构建按 `ADD_eBPF` 自动选对应的缓存 / asset；
 - 两个 `build-rockchip-2512*.yml` 在编译前恢复：**Actions 缓存优先，未命中再从 Release 下载解压**，
   并自动改 `Makefile` 跳过 tools/toolchain 编译（省 40~70 分钟）。
 

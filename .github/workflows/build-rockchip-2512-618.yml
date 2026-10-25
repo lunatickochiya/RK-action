@@ -308,7 +308,7 @@ jobs:
         ccache: 'false'
         toolchain: 'true'
         skip: 'true'
-        mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}
+        mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
         skip_saving: 'true'
 
@@ -322,7 +322,8 @@ jobs:
       run: |
         command -v zstd >/dev/null || sudo apt-get install -y -qq zstd
         TC_HASH=$(git log --pretty=tformat:"%h" -n1 tools toolchain)
-        ASSET="toolchain-${OpenWrt_PATCH_FILE_DIR}-${TC_HASH}.tar.zst"
+        TC_SUFFIX="${eBPF:-}"
+        ASSET="toolchain-${OpenWrt_PATCH_FILE_DIR}${TC_SUFFIX}-${TC_HASH}.tar.zst"
         if gh release download toolchain-cache -p "$ASSET" -D /tmp --clobber 2>/dev/null; then
           echo "从 Release 恢复工具链：$ASSET"
           tar --zstd -xf "/tmp/$ASSET" -C .

@@ -2,13 +2,15 @@ name: Build Toolchain Cache (Rockchip)
 
 # 只编译 tools + toolchain，并把结果同时放进：
 #   1) Actions 缓存（cachewrtbuild，key 里带 tools/toolchain 的 git hash）
-#   2) Release `toolchain-cache` 的 asset：toolchain-<画像>-<hash>.tar.zst
+#   2) Release `toolchain-cache` 的 asset：toolchain-<画像>[_eBPF]-<hash>.tar.zst
 # build-rockchip-2512*.yml 在编译固件前会先恢复工具链（缓存优先、Release 兜底），
 # 省掉每次从零编 gcc/binutils/musl + host tools 的 40~70 分钟。
 #
 # 用法：
 #   - 只在 Actions 里手动触发（Run workflow），选内核画像
 #     （openwrt-2512-618-rk / openwrt-2512-rk），不会自动运行
+#   - eBPF 开关要和固件构建时的 ADD_eBPF 一致：开 eBPF 时会多编 host bpftool，
+#     所以 eBPF / 非 eBPF 各存一份缓存与 asset
 
 permissions:
   contents: write
@@ -37,6 +39,14 @@ on:
         - 'mpc1917_lite'
         - 'fmx1_pro'
         - 'shimeta_aiot3588a'
+      ebpf:
+        description: '是否启用 eBPF（需和固件构建的 ADD_eBPF 一致；eBPF 多编 host bpftool）'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+        - 'false'
+        - 'true'
 
 env:
   TZ: Asia/Shanghai
@@ -46,7 +56,7 @@ jobs:
   toolchain:
     runs-on: ubuntu-24.04
     timeout-minutes: 330
-    name: Toolchain ${{ github.event.inputs.patch_dir }}
+    name: Toolchain ${{ github.event.inputs.patch_dir }}${{ github.event.inputs.ebpf == 'true' && ' (eBPF)' || '' }}
     env:
       OpenWrt_PATCH_FILE_DIR: ${{ github.event.inputs.patch_dir }}
       Matrix_Target: rockchip-nftables
@@ -82,7 +92,13 @@ jobs:
       env:
         PATCH_JSON_INPUT: '{"BCM_FULLCONE": "0", "TRY_BBR_V3": "0", "TEST_KERNEL": "0", "ADD_eBPF": "0"}'
         CONFIG_JSON_INPUT: '{"Cache": "0", "CacheSave": "false", "CacheSaveOnFailure": "true", "UPLOAD_RELEASE": "0", "ALLKMOD": "0"}'
+        INPUT_EBPF: ${{ github.event.inputs.ebpf }}
       run: |
+        if [ "$INPUT_EBPF" = "true" ]; then
+          PATCH_JSON_INPUT=$(echo "$PATCH_JSON_INPUT" | jq '.ADD_eBPF="1"')
+          export PATCH_JSON_INPUT
+          echo "eBPF enabled: $PATCH_JSON_INPUT"
+        fi
         $GITHUB_WORKSPACE/core.sh init-gh-env-2512-rk
 
     - name: 克隆源代码
@@ -122,12 +138,6 @@ jobs:
         sed -i '$a src-git lunatic7 https://github.com/lunatickochiya/luna-action-packages.git' feeds.conf.default
         sed -i '$a src-git node https://github.com/nxhack/openwrt-node-packages.git;openwrt-25.12' feeds.conf.default
         echo "status=success" >> $GITHUB_OUTPUT
-
-    - name: 增加磁盘空间
-      env:
-        DEBIAN_FRONTEND: noninteractive
-      run: |
-        $GITHUB_WORKSPACE/core.sh ln-openwrt
 
     - name: Patch 自定义
       id: patch
@@ -180,7 +190,7 @@ jobs:
         ccache: 'false'
         toolchain: 'true'
         skip: 'true'
-        mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}
+        mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
 
     - name: 上传工具链到 Release
@@ -190,7 +200,8 @@ jobs:
       run: |
         command -v zstd >/dev/null || sudo apt-get install -y -qq zstd
         TC_HASH=$(git log --pretty=tformat:"%h" -n1 tools toolchain)
-        ASSET="toolchain-${OpenWrt_PATCH_FILE_DIR}-${TC_HASH}.tar.zst"
+        TC_SUFFIX="${eBPF:-}"
+        ASSET="toolchain-${OpenWrt_PATCH_FILE_DIR}${TC_SUFFIX}-${TC_HASH}.tar.zst"
         echo "toolchain hash: $TC_HASH"
         tar -cf - staging_dir/host* staging_dir/tool* | zstd -3 -T0 -q -o "/tmp/$ASSET"
         ls -lh "/tmp/$ASSET"
