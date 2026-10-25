@@ -22,6 +22,89 @@ openwrt-2512-618-rk)
 	;;
 esac
 
+# 解析 workflow_dispatch / repository_dispatch 传入的机型，生成 iptables/nftables 构建矩阵。
+# 参考 AP-action-IPQ 的 resolve-build-matrix：单 job 完成，不再为每个机型各跑一份 prepare。
+function device_config_error() {
+	echo "::error title=Device config error::$*" >&2
+	return 1
+}
+
+function resolve_build_matrix() {
+	local workspace="${GITHUB_WORKSPACE:-$PWD}"
+	local machine="${Target_CFG_Machine:-}"
+	local config_dir="$workspace/machine-configs/${OpenWrt_PATCH_FILE_DIR:-}"
+	local package_dir="$workspace/package-configs/${OpenWrt_PATCH_FILE_DIR:-}"
+	local config_file file_name target candidate_target matrix firewall
+	local target_length best_length=999999
+	local ambiguous_target=false
+	local -a iptables_configs
+
+	if [[ ! "$machine" =~ ^[A-Za-z0-9._-]+$ ]]; then
+		device_config_error "Invalid or empty machine name: '$machine'"
+		return 1
+	fi
+	if [ -z "${OpenWrt_PATCH_FILE_DIR:-}" ] || [ ! -d "$config_dir" ]; then
+		device_config_error "Machine config directory not found: $config_dir"
+		return 1
+	fi
+
+	shopt -s nullglob
+	iptables_configs=("$config_dir/${machine}-"*"-iptables.config")
+	shopt -u nullglob
+	if [ "${#iptables_configs[@]}" -eq 0 ]; then
+		device_config_error "No ${machine}-<target>-iptables.config found in $config_dir"
+		return 1
+	fi
+
+	# 机型名可能是另一个机型的前缀（例如 -v2 与 -v2-lite），
+	# 精确机型对应最短的 <target> 后缀。
+	for config_file in "${iptables_configs[@]}"; do
+		file_name="${config_file##*/}"
+		candidate_target="${file_name#"${machine}-"}"
+		candidate_target="${candidate_target%-iptables.config}"
+		if [[ ! "$candidate_target" =~ ^[A-Za-z0-9._-]+$ ]]; then
+			continue
+		fi
+		target_length="${#candidate_target}"
+		if [ "$target_length" -lt "$best_length" ]; then
+			target="$candidate_target"
+			best_length="$target_length"
+			ambiguous_target=false
+		elif [ "$target_length" -eq "$best_length" ] && [ "$candidate_target" != "$target" ]; then
+			ambiguous_target=true
+		fi
+	done
+	if [ -z "${target:-}" ] || [ "$ambiguous_target" = true ]; then
+		device_config_error "Could not uniquely resolve target for $machine in $config_dir"
+		return 1
+	fi
+
+	for firewall in iptables nftables; do
+		config_file="$config_dir/${machine}-${target}-${firewall}.config"
+		if [ ! -s "$config_file" ]; then
+			device_config_error "Missing machine config: $config_file"
+			return 1
+		fi
+		config_file="$package_dir/${machine}-${target}-${firewall}.config"
+		if [ ! -s "$config_file" ]; then
+			device_config_error "Missing package config: $config_file"
+			return 1
+		fi
+	done
+
+	printf -v matrix '{"include":[{"target":"%s-iptables"},{"target":"%s-nftables"}]}' "$target" "$target"
+	echo "Resolved $machine to target $target"
+	echo "Generated matrix: $matrix"
+	if [ -n "${GITHUB_OUTPUT:-}" ]; then
+		{
+			echo "matrix=$matrix"
+			echo "machine=$machine"
+		} >> "$GITHUB_OUTPUT"
+	else
+		echo "$matrix"
+	fi
+}
+
 function init_openwrt_patch_file_dir_2512_rk() {
 : "${OpenWrt_PATCH_FILE_DIR:=openwrt-2512-rk}"
 }
@@ -772,6 +855,8 @@ init_gh_env_2512_rk
 config_json_input_set
 patch_json_input_set
 init_gh_env_common
+elif [ "$1" == "resolve-build-matrix" ]; then
+resolve_build_matrix
 elif [ "$1" == "init-openwrt-patch-2512-rk" ]; then
 init_openwrt_patch_common
 elif [ "$1" == "ln-openwrt" ]; then

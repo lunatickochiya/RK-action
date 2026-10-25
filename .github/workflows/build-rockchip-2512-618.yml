@@ -55,30 +55,20 @@ env:
 jobs:
   prepare:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
-    strategy:
-      matrix:
-        include:
-        - rockchip: ztl-joyrock
-        - rockchip: ztl-lite
-        - rockchip: mpc1917
-        - rockchip: mpc1917_lite
-        - rockchip: fmx1_pro
-        - rockchip: shimeta_aiot3588a
-
+      machine: ${{ steps.set-matrix.outputs.machine }}
+    env:
+      Target_CFG_Machine: ${{ github.event.inputs.MACH || github.event.client_payload.MACH }}
     steps:
       - name: 检查
         uses: actions/checkout@main
 
-      - name: 生成矩阵配置
+      - name: 解析构建矩阵
+        # 参考 AP-action-IPQ：单 job 解析机型 -> target，不再为每个机型各跑一份 prepare
         id: set-matrix
-        run: |
-          if [ "${{ github.event.inputs.MACH }}" == "${{ matrix.rockchip }}" ]; then
-            matrix={\"include\":[{\"target\":\"rockchip-iptables\"},{\"target\":\"rockchip-nftables\"}]}
-          fi
-          echo "Generated matrix: "$matrix""
-          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+        run: bash "$GITHUB_WORKSPACE/core.sh" resolve-build-matrix
 
   build:
     runs-on: Ubuntu-24.04
@@ -87,14 +77,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
-    name: Build ${{github.event.inputs.MACH}} openwrt 25.12 (Linux 6.18) ${{ matrix.target }}
+    name: Build ${{ needs.prepare.outputs.machine }} openwrt 25.12 (Linux 6.18) ${{ matrix.target }}
     env:
       Matrix_Target: ${{ matrix.target }}
-      Target_CFG_Machine: ${{github.event.inputs.MACH}}
+      Target_CFG_Machine: ${{ needs.prepare.outputs.machine }}
       OpenWrt_PATCH_FILE_DIR: openwrt-2512-618-rk
       SFE_INPUT_STATUS: ${{ github.event.inputs.SFE_BUILDIN || 'true' }}
 
     steps:
+    - name: 记录 build job 开始时间
+      # 6h 是 build job 的总时限（prepare job 不计入）。编译步骤从这里算剩余预算，
+      # 到 5h55m 主动失败，让 post 缓存步骤有时间跑（cancelled 状态下不会保存缓存）。
+      run: echo "BUILD_JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
     - name: 检查
       uses: actions/checkout@main
 
@@ -267,7 +262,7 @@ jobs:
         echo "------------------------"
         awk '/CONFIG_LINUX/ { print }' .config
         awk '/${{matrix.target}}/ { print }' .config
-        awk '/${{github.event.inputs.MACH}}/ { print }' .config
+        awk '/${{ needs.prepare.outputs.machine }}/ { print }' .config
         echo "------------------------"
         awk '/docker/ { print }' .config
         echo "------------------------"
@@ -355,9 +350,31 @@ jobs:
     - name: 编译固件
       id: compile
       working-directory: ./openwrt
+      env:
+        # 6h 是 build job 的总时限；从 build job 开始算，5h55m 必须停止编译，
+        # 留 5 分钟给缓存 post 上传。SETUP_MARGIN 用于补偿"job 开始->第一步"的
+        # setup 时间（通常十几秒，这里按 60s 保守估算）。
+        BUILD_JOB_STOP_SECONDS: '21300'
+        CACHE_RESERVE_SECONDS: '300'
+        BUILD_JOB_SETUP_MARGIN_SECONDS: '60'
       run: |
-        echo -e "$(($(nproc)+1)) thread compile"
-        make -j$(($(nproc)+1)) || make -j1 V=s
+        start=${BUILD_JOB_START_EPOCH:-$(date +%s)}
+        elapsed=$(( $(date +%s) - start + BUILD_JOB_SETUP_MARGIN_SECONDS ))
+        budget=$(( BUILD_JOB_STOP_SECONDS - elapsed ))
+        echo "build job 已运行约 ${elapsed}s，本次编译预算 ${budget}s（build job 开始后 5h55m 停止编译，留 5min 存缓存）"
+        if [ "$budget" -le 0 ]; then
+          echo "::error ::build job 已运行 ${elapsed}s（超过 5h55m 阈值），直接失败以便保存缓存"
+          exit 1
+        fi
+        set +e
+        timeout --signal=TERM --kill-after=60s "$budget" bash -c 'make -j$(($(nproc)+1)) || make -j1 V=s'
+        rc=$?
+        set -e
+        if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+          echo "::error ::编译到达 build job 开始后 5h55m 阈值，主动中断（本次预算 ${budget}s），留 5min 给缓存保存"
+          exit 1
+        fi
+        [ "$rc" -eq 0 ] || exit "$rc"
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: 检查空间使用情况
@@ -410,7 +427,7 @@ jobs:
       continue-on-error: true
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true'
       with:
-        name: ${{ env.date3 }}_${{matrix.target}}_firmware_openwrt-25.12-6.18-${{github.event.inputs.MACH}}-${{ github.event.inputs.SETIP }}${{ env.Kernel_Test }}${{ env.BCM_FULLCONE_NAME }}${{ env.SFE }}${{ env.TRY_BBR_V3_NAME }}${{ env.eBPF }}
+        name: ${{ env.date3 }}_${{matrix.target}}_firmware_openwrt-25.12-6.18-${{ needs.prepare.outputs.machine }}-${{ github.event.inputs.SETIP }}${{ env.Kernel_Test }}${{ env.BCM_FULLCONE_NAME }}${{ env.SFE }}${{ env.TRY_BBR_V3_NAME }}${{ env.eBPF }}
         path: |
           firmware
 
@@ -419,7 +436,7 @@ jobs:
       continue-on-error: true
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_IPK_DIR == 'true' && steps.afb.outputs.status == 'success'
       with:
-        name: ${{ env.date3 }}_${{matrix.target}}_ipks_openwrt-25.12-6.18-${{github.event.inputs.MACH}}${{ env.Kernel_Test }}${{ env.BCM_FULLCONE_NAME }}${{ env.SFE }}${{ env.TRY_BBR_V3_NAME }}${{ env.eBPF }}
+        name: ${{ env.date3 }}_${{matrix.target}}_ipks_openwrt-25.12-6.18-${{ needs.prepare.outputs.machine }}${{ env.Kernel_Test }}${{ env.BCM_FULLCONE_NAME }}${{ env.SFE }}${{ env.TRY_BBR_V3_NAME }}${{ env.eBPF }}
         path: |
           ipks
 
@@ -460,8 +477,8 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         files: "${{ env.FIRMWARE }}/*"
-        name: ${{ env.date }} ${{matrix.target}}-${{github.event.inputs.MACH}}-openwrt-25.12-6.18
-        tag_name: ${{ env.date }}_${{matrix.target}}-${{github.event.inputs.MACH}}-openwrt-25.12-6.18
+        name: ${{ env.date }} ${{matrix.target}}-${{ needs.prepare.outputs.machine }}-openwrt-25.12-6.18
+        tag_name: ${{ env.date }}_${{matrix.target}}-${{ needs.prepare.outputs.machine }}-openwrt-25.12-6.18
         body_path: release.txt
 
     - name: 删除工作流

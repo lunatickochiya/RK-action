@@ -67,6 +67,20 @@
 | `CacheSave` | `"false"` | 传给 action 的 `skip_saving`：**默认 `"false"` = 保存**；设 `"true"` 则只读不写（命名沿用 autoset） |
 | `CacheSaveOnFailure` | `"true"` | `core.sh` 导出成 env `CACHEWRT_SAVE_ON_FAILURE`，fork 的 `post-if` 读它：编译失败也执行 post 保存 |
 
+## 6h 超时保护
+
+GitHub 托管 runner 的**单个 job** 上限是 6 小时（prepare job 不计入 build job），
+超时状态是 `cancelled` —— 缓存 action 的 post 步骤不会执行，等于白跑。
+`编译固件` 步骤按 **build job 开始到当前**的时间计算预算：
+
+- 截止点 = **build job 开始后 5h55m**（`BUILD_JOB_STOP_SECONDS=21300`），留 5 分钟给缓存 post 上传；
+- 计时起点是 build job 第一步记录的 `BUILD_JOB_START_EPOCH`，另外加 60s
+  （`BUILD_JOB_SETUP_MARGIN_SECONDS`）补偿 job setup 与第一步之间的时间；
+- make 用 `timeout` 包住，预算用完主动中断并报错（job 变成 failure，不是 cancelled）；
+- 这样缓存 post 能正常保存/上传，不会出现“跑了 6 小时、缓存没存下来”。
+
+预算不够时（前面的克隆/feeds/下载耗时过长）会在编译开始前直接失败，同样是为了先保住缓存。
+
 ## 支持设备
 
 | MACH | 设备 | 说明 |
