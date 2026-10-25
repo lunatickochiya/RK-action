@@ -315,6 +315,8 @@ jobs:
       working-directory: ./openwrt
       env:
         GH_TOKEN: ${{ github.token }}
+        # 同工具链工作流：显式指向本仓库，避免 gh 拿 openwrt 的 origin 去查 release
+        GH_REPO: ${{ github.repository }}
       run: |
         command -v zstd >/dev/null || sudo apt-get install -y -qq zstd
         TC_HASH=$(git log --pretty=tformat:"%h" -n1 tools toolchain)
