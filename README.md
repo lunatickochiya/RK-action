@@ -81,6 +81,17 @@ GitHub 托管 runner 的**单个 job** 上限是 6 小时（prepare job 不计�
 
 预算不够时（前面的克隆/feeds/下载耗时过长）会在编译开始前直接失败，同样是为了先保住缓存。
 
+### 编译日志与失败排查
+
+`编译固件` 用 `make ... V=s` 构建，完整输出（含每条编译命令）写到
+`openwrt/compile.log`；CI 日志只放行 `make[N] -C ...` 进度行和
+`error:` / `Error N` / `ERROR:` / `command not found` 行，所以 action 页面看起来
+和默认（非 `V=s`）构建一样，不会被几十万行命令刷屏。
+
+编译失败（或触发 5h55m 超时）时，日志会 gzip 成 `compile.log.gz` 并作为 artifact
+上传，名字是 `compile-log-<机型>-<target>`，保留 7 天。下载后
+`zcat compile.log.gz | less` 即可看完整构建过程（从第 1 行到失败点）。
+
 ### 关于 tools/b43-tools
 
 `b43-fwsquash.py` 是纯 python 脚本，工具链缓存里没有时直接

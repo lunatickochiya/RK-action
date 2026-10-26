@@ -380,15 +380,39 @@ jobs:
           exit 1
         fi
         set +e
-        timeout --signal=TERM --kill-after=60s "$budget" bash -c 'make -j$(($(nproc)+1)) || make -j1 V=s'
-        rc=$?
+        # V=s 的完整输出（含每条编译命令）写进 compile.log，失败时上传 artifact；
+        # CI 日志只放行和默认构建一样的进度行（make[N] -C ...）和 error 行，
+        # 所以从 action 页面上看和没开 V=s 一样，不会被几十万行命令刷屏。
+        set -o pipefail
+        timeout --signal=TERM --kill-after=60s "$budget" \
+          bash -c 'make -j$(($(nproc)+1)) V=s' 2>&1 \
+          | tee compile.log \
+          | grep --line-buffered -E 'make\[[0-9]+\] -C |^time: |error:|Error [0-9]+|ERROR: |command not found'
+        rc=${PIPESTATUS[0]}
+        set +o pipefail
         set -e
+        if [ "$rc" -ne 0 ]; then
+          # 失败时压缩到 GITHUB_WORKSPACE（openwrt 是 /workdir/openwrt 的软链，
+          # artifact 上传不跟随软链，所以放工作区根目录），避免日志过大。
+          gzip -6 -c compile.log > "$GITHUB_WORKSPACE/compile.log.gz" || true
+        fi
         if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
           echo "::error ::编译到达 build job 开始后 5h55m 阈值，主动中断（本次预算 ${budget}s），留 5min 给缓存保存"
           exit 1
         fi
         [ "$rc" -eq 0 ] || exit "$rc"
         echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 上传编译日志
+      # 只在失败时上传；compile.log 已在编译步骤里 gzip 成 compile.log.gz
+      if: failure()
+      continue-on-error: true
+      uses: actions/upload-artifact@main
+      with:
+        name: compile-log-${{ needs.prepare.outputs.machine }}-${{ matrix.target }}
+        path: compile.log.gz
+        if-no-files-found: ignore
+        retention-days: 7
 
     - name: 检查空间使用情况
       if: (!cancelled())
