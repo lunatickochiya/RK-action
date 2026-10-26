@@ -380,23 +380,9 @@ jobs:
           exit 1
         fi
         set +e
-        # 默认构建是静默的：子 make 的 stdout/stderr 全被丢进 /dev/null，日志里只剩
-        # 进度行，出错时看不到真实原因。这里用 V=1（只丢 stdout、保留 stderr），
-        # 但把 stderr 全部重定向到文件，不进 CI 日志——日志保持干净，不会被
-        # modpost 的 missing MODULE_DESCRIPTION() 等无害警告刷屏。
-        # 失败/超时后再从文件里把 error 行和末尾日志汇总打印出来。
-        timeout --signal=TERM --kill-after=60s "$budget" \
-          bash -c 'make -j$(($(nproc)+1)) V=1' 2> /tmp/openwrt-err.log
+        timeout --signal=TERM --kill-after=60s "$budget" bash -c 'make -j$(($(nproc)+1)) || make -j1 V=s'
         rc=$?
         set -e
-        if [ "$rc" -ne 0 ] && [ -s /tmp/openwrt-err.log ]; then
-          echo "::group::编译报错汇总（stderr）"
-          grep -nE 'error:|Error [0-9]+|ERROR: |command not found|No such file|undefined!' \
-            /tmp/openwrt-err.log | tail -n 120 || true
-          echo "--------- stderr 末尾 40 行 ---------"
-          tail -n 40 /tmp/openwrt-err.log || true
-          echo "::endgroup::"
-        fi
         if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
           echo "::error ::编译到达 build job 开始后 5h55m 阈值，主动中断（本次预算 ${budget}s），留 5min 给缓存保存"
           exit 1

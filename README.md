@@ -81,24 +81,6 @@ GitHub 托管 runner 的**单个 job** 上限是 6 小时（prepare job 不计�
 
 预算不够时（前面的克隆/feeds/下载耗时过长）会在编译开始前直接失败，同样是为了先保住缓存。
 
-### 编译失败时怎么直接看到真实报错
-
-OpenWrt 默认构建会把子 make 的 **stdout 和 stderr 一起**丢进 `/dev/null`
-（`include/verbose.mk` 的 `SILENT:=>/dev/null 2>&1`），所以日志里往往只剩
-`ERROR: package/xxx failed to build`，看不到是哪个文件、哪一行出错。
-
-做法：`make ... V=1`（OpenWrt 的 `V=1` 等于 `V=w`，只丢弃子 make 的 stdout、
-保留 stderr），但 **stderr 直接重定向到 `/tmp/openwrt-err.log`，不进 CI 日志**：
-
-- CI 日志只保留正常的进度行，不会被 `WARNING: modpost: missing MODULE_DESCRIPTION()`
-  这类无害警告（ALLKMOD 下几乎一个模块一条）刷屏；
-- 编译失败/超时时，从该文件里汇总所有 `error:` / `Error N` / `ERROR:` /
-  `command not found` / `No such file` / `undefined!` 行，再附上 stderr 末尾 40 行，
-  打印到 `编译报错汇总` group 里——多线程构建里真正失败的包一定在其中；
-- 不做单包重试，也不再用 `make -j1 V=s` 兜底（既耗预算又可能长时间无输出）。
-
-如果汇总里信息不够，可以本地复现或临时把该步骤改成 `V=s` 看完整命令。
-
 ### 关于 tools/b43-tools
 
 `b43-fwsquash.py` 是纯 python 脚本，工具链缓存里没有时直接
