@@ -250,6 +250,9 @@ openwrt-2512-618-rk/           # 6.18 需要套在源码树上的补丁/资源
   （额外去掉 `kmod-drm-panfrost`/`libmesa-panfrost`，避免 llvm+mesa 的长时间编译），
   设备仍是 `shimeta_aiot3588a`，只是 `package-configs` 换成了
   `package-configs/openwrt-2512-618-rk/shimeta_aiot3588a_lite-rockchip-*.config`。
+- 6.18 的所有机型都已经去掉 `luci-app-quickfile`：它会拉入 `quickfile`（Rust），
+  进而触发 `rust/host-compile`，实测单次 **4 小时 20 分**（`time:` 行显示
+  `#27506.58#1238.18#15605.60`），是 lite 构建超时的直接原因。需要它的 ipk 时再单独加回。
 
 ### lite 机型与缓存预热
 
