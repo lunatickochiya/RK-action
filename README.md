@@ -87,25 +87,23 @@ OpenWrt 默认构建会把子 make 的 **stdout 和 stderr 一起**丢进 `/dev/
 （`include/verbose.mk` 的 `SILENT:=>/dev/null 2>&1`），所以日志里往往只剩
 `ERROR: package/xxx failed to build`，看不到是哪个文件、哪一行出错。
 
-`编译固件` 现在用 **`make ... V=1`**：对 OpenWrt 来说 `V=1` 等于 `V=w`，只会丢弃
-子 make 的 stdout（编译命令回显），**stderr 照常输出**。于是：
+做法：`make ... V=1`（OpenWrt 的 `V=1` 等于 `V=w`，只丢弃子 make 的 stdout、
+保留 stderr），但 **stderr 直接重定向到 `/tmp/openwrt-err.log`，不进 CI 日志**：
 
-- gcc/ld 的 `error:`、`modpost` 的 `ERROR:`、shell 的 `command not found`、
-  `make: *** [...] Error 1` 都会直接出现在 CI 日志里；
-- 不需要事后重试，也不存在“多线程构建里日志报错的包不一定是真正失败包”的问题；
-- 日志不会像 `V=s` 那样把每条编译命令都打出来，体积可控。
+- CI 日志只保留正常的进度行，不会被 `WARNING: modpost: missing MODULE_DESCRIPTION()`
+  这类无害警告（ALLKMOD 下几乎一个模块一条）刷屏；
+- 编译失败/超时时，从该文件里汇总所有 `error:` / `Error N` / `ERROR:` /
+  `command not found` / `No such file` / `undefined!` 行，再附上 stderr 末尾 40 行，
+  打印到 `编译报错汇总` group 里——多线程构建里真正失败的包一定在其中；
+- 不做单包重试，也不再用 `make -j1 V=s` 兜底（既耗预算又可能长时间无输出）。
 
-两点降噪/汇总：
+如果汇总里信息不够，可以本地复现或临时把该步骤改成 `V=s` 看完整命令。
 
-- `WARNING: modpost: missing MODULE_DESCRIPTION()` 是无害警告，ALLKMOD 下几乎
-  一个模块一条，会淹没日志；实时输出里会过滤掉它（完整日志仍保存在
-  `/tmp/openwrt-make.log`）；
-- 编译失败时，从完整日志里汇总所有 `error:` / `Error N` / `ERROR:` /
-  `command not found` / `undefined!` 行，打印到 `失败汇总` group 里——
-  多线程构建里真正失败的包一定在其中，不需要猜。
+### 关于 tools/b43-tools
 
-不再用 `make -j1 V=s` 兜底：那会把整个 world 从零重编，既耗光 5h55m 预算，
-又可能长时间没有任何输出。
+`b43-fwsquash.py` 是纯 python 脚本，工具链缓存里没有时直接
+`cp tools/b43-tools/files/b43-fwsquash.py staging_dir/host/bin/` 即可（秒级）；
+不要用 `make tools/install` 去补，那会把一批 host 工具重编，多花十几分钟。
 
 ### 在工具链缓存里预热 libmesa-panfrost（可选）
 

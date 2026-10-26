@@ -345,17 +345,20 @@ jobs:
       if: (!cancelled())
       run: df -hT
 
-    - name: 补齐工具链缓存缺失的 host 工具
-      # 工具链缓存/Release 包是按工具链 workflow 自己的 .config 编的（那份 .config
-      # 甚至可能不存在），所以依赖配置的 tools（b43-tools 等）可能没编进去：
-      #   bash: line 1: b43-fwsquash.py: command not found
-      #   make[3]: *** [.../kmod-b43-...apk] Error 127
-      # 这里按当前 .config 跑一次 tools/install：缓存里已有的工具都有 stamp，
-      # 几秒就结束；缺的工具现场补编，不用等下一次工具链缓存。
+    - name: 补齐 b43-fwsquash.py
+      # 工具链缓存里可能没有 tools/b43-tools（工具链 workflow 的 .config 不一定选了
+      # kmod-b43），而 mac80211 写 b43 固件时要用 b43-fwsquash.py。
+      # 它是纯 python 脚本、不需要编译，直接拷一个即可——不要用 `make tools/install`，
+      # 那会把一堆 host 工具重编一遍，白白多花十几分钟。
       if: (!cancelled())
       working-directory: ./openwrt
       run: |
-        make -j$(($(nproc)+1)) tools/install
+        if [ ! -x staging_dir/host/bin/b43-fwsquash.py ] && [ -f tools/b43-tools/files/b43-fwsquash.py ]; then
+          mkdir -p staging_dir/host/bin
+          cp tools/b43-tools/files/b43-fwsquash.py staging_dir/host/bin/
+          chmod +x staging_dir/host/bin/b43-fwsquash.py
+          echo "已补齐 b43-fwsquash.py"
+        fi
 
     - name: 编译固件
       id: compile
@@ -377,30 +380,26 @@ jobs:
           exit 1
         fi
         set +e
-        set -o pipefail
-        # V=1（=V=w）：OpenWrt 只丢弃子 make 的 stdout，stderr 照常输出——
-        # 编译错误、modpost 报错、make 的 *** Error 都会直接出现在日志里。
-        # modpost 的 missing MODULE_DESCRIPTION() 是无害警告、ALLKMOD 下一条
-        # 模块一行，量大且干扰排查，这里在实时输出里过滤掉；
-        # 完整输出仍写入 /tmp/openwrt-make.log，失败时再从中汇总 error 行。
+        # 默认构建是静默的：子 make 的 stdout/stderr 全被丢进 /dev/null，日志里只剩
+        # 进度行，出错时看不到真实原因。这里用 V=1（只丢 stdout、保留 stderr），
+        # 但把 stderr 全部重定向到文件，不进 CI 日志——日志保持干净，不会被
+        # modpost 的 missing MODULE_DESCRIPTION() 等无害警告刷屏。
+        # 失败/超时后再从文件里把 error 行和末尾日志汇总打印出来。
         timeout --signal=TERM --kill-after=60s "$budget" \
-          bash -c 'make -j$(($(nproc)+1)) V=1' 2>&1 \
-          | tee /tmp/openwrt-make.log \
-          | awk '/^WARNING: modpost: missing MODULE_DESCRIPTION/{next} {print}'
+          bash -c 'make -j$(($(nproc)+1)) V=1' 2> /tmp/openwrt-err.log
         rc=$?
-        set +o pipefail
         set -e
+        if [ "$rc" -ne 0 ] && [ -s /tmp/openwrt-err.log ]; then
+          echo "::group::编译报错汇总（stderr）"
+          grep -nE 'error:|Error [0-9]+|ERROR: |command not found|No such file|undefined!' \
+            /tmp/openwrt-err.log | tail -n 120 || true
+          echo "--------- stderr 末尾 40 行 ---------"
+          tail -n 40 /tmp/openwrt-err.log || true
+          echo "::endgroup::"
+        fi
         if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
           echo "::error ::编译到达 build job 开始后 5h55m 阈值，主动中断（本次预算 ${budget}s），留 5min 给缓存保存"
           exit 1
-        fi
-        if [ "$rc" -ne 0 ]; then
-          # 不做单包重试（多线程下日志报错的包不一定是真正失败的包），
-          # 直接把整份日志里的 error/Error 行汇总出来，真正失败的包就在其中。
-          echo "::group::失败汇总：日志里的 error/Error/命令找不到行"
-          grep -nE 'error:|Error [0-9]+|ERROR: |command not found|No such file|undefined!' \
-            /tmp/openwrt-make.log | tail -n 80 || true
-          echo "::endgroup::"
         fi
         [ "$rc" -eq 0 ] || exit "$rc"
         echo "status=success" >> $GITHUB_OUTPUT
