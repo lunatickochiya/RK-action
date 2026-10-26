@@ -25,6 +25,7 @@ on:
         - 'mpc1917_lite'
         - 'fmx1_pro'
         - 'shimeta_aiot3588a'
+        - 'shimeta_aiot3588a_lite'
       SETIP:
         description: 'Set LAN IP address'
         default: '192.168.6.1'

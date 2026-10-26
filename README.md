@@ -124,11 +124,12 @@ make[3]: *** [.../kmod-b43-...apk] Error 127
 | `mpc1917_lite` | 同上（`mpc1917` 设备） | 精简包配置 |
 | `fmx1_pro` | ChipTrip FMX1 Pro | RK3399 |
 | `shimeta_aiot3588a` | ShiMeta AIOT-3588A | RK3588（VPU/NPU/MPP） |
+| `shimeta_aiot3588a_lite` | 同上（`shimeta_aiot3588a` 设备） | **精简包配置**：去掉代理/下载/媒体/文件管理/监控/多主题/panfrost 等重包 |
 
 `*_lite` 机型与全量机型的设备（machine-config）完全相同，区别只在 `package-configs` 里的软件包集合。
 
 > 6.18 工作流当前只提供源码分支 `openwrt-25.12-6.18-rk` 已带板级支持的机型：
-> `ztl-joyrock` / `ztl-lite` / `mpc1917` / `mpc1917_lite` / `fmx1_pro` / `shimeta_aiot3588a`。
+> `ztl-joyrock` / `ztl-lite` / `mpc1917` / `mpc1917_lite` / `fmx1_pro` / `shimeta_aiot3588a` / `shimeta_aiot3588a_lite`。
 > 该分支目前没有 `wesine-tpm312` 的 DTS/U-Boot 目标，因此 6.18 的 machine/package 配置里
 > 不包含 `tpm312`；等源码分支补齐后再加回即可。
 
@@ -228,3 +229,21 @@ openwrt-2512-618-rk/           # 6.18 需要套在源码树上的补丁/资源
   保留 autoset/emmc-info/istorex、iptables(或 nftables)+fullcone、docker、打印、RKMPP 等基础能力。
   需要增减时直接改 `package-configs/openwrt-2512-rk/ztl-lite-rockchip-*.config`，
   6.18 对应改 `package-configs/openwrt-2512-618-rk/ztl-lite-rockchip-*.config`。
+- `shimeta_aiot3588a_lite` 按同样思路由 `shimeta_aiot3588a` 的配置生成
+  （额外去掉 `kmod-drm-panfrost`/`libmesa-panfrost`，避免 llvm+mesa 的长时间编译），
+  设备仍是 `shimeta_aiot3588a`，只是 `package-configs` 换成了
+  `package-configs/openwrt-2512-618-rk/shimeta_aiot3588a_lite-rockchip-*.config`。
+
+### lite 机型与缓存预热
+
+ccache 的 cache key 是 `target + eBPF`（不含机型），所以同一 target 下 lite 和完整版**共用**
+同一份 ccache：lite 先跑一遍，完整版再跑时 kernel、ALLKMOD 的全部 kmod、mac80211 以及两者
+共有的用户态包都会命中缓存。实测（run 40272641266，lite 先跑、缓存来自之前的完整版）：
+
+- 内核 `target/linux compile`：11~15 分钟（冷编译要数小时）；
+- mac80211：约 15 分钟（冷编译约 70 分钟）；
+- lite 全流程（内核 + 300 多个包 + mac80211）：约 1 小时。
+
+因此推荐顺序是：先跑一次 `*_lite`（它会保存 ccache，失败也会保存，`CacheSaveOnFailure=true`），
+再跑完整机型。注意 lite 裁掉的包（如 panfrost 的 llvm/mesa、代理/媒体包）不会被预热，
+如果完整版仍然超时，优先考虑把这些重包也从完整版裁掉，或让 lite 保留它们。
