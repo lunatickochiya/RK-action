@@ -382,16 +382,30 @@ jobs:
           exit 1
         fi
         set +e
+        set -o pipefail
         # V=1（=V=w）：OpenWrt 只丢弃子 make 的 stdout，stderr 照常输出——
         # 编译错误、modpost 报错、make 的 *** Error 都会直接出现在日志里。
-        # 不再用 `make -j1 V=s` 兜底：那会把整个 world 从零重编，既耗光
-        # 5h55m 预算，又可能长时间没有任何输出。
-        timeout --signal=TERM --kill-after=60s "$budget" bash -c 'make -j$(($(nproc)+1)) V=1'
+        # modpost 的 missing MODULE_DESCRIPTION() 是无害警告、ALLKMOD 下一条
+        # 模块一行，量大且干扰排查，这里在实时输出里过滤掉；
+        # 完整输出仍写入 /tmp/openwrt-make.log，失败时再从中汇总 error 行。
+        timeout --signal=TERM --kill-after=60s "$budget" \
+          bash -c 'make -j$(($(nproc)+1)) V=1' 2>&1 \
+          | tee /tmp/openwrt-make.log \
+          | awk '/^WARNING: modpost: missing MODULE_DESCRIPTION/{next} {print}'
         rc=$?
+        set +o pipefail
         set -e
         if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
           echo "::error ::编译到达 build job 开始后 5h55m 阈值，主动中断（本次预算 ${budget}s），留 5min 给缓存保存"
           exit 1
+        fi
+        if [ "$rc" -ne 0 ]; then
+          # 不做单包重试（多线程下日志报错的包不一定是真正失败的包），
+          # 直接把整份日志里的 error/Error 行汇总出来，真正失败的包就在其中。
+          echo "::group::失败汇总：日志里的 error/Error/命令找不到行"
+          grep -nE 'error:|Error [0-9]+|ERROR: |command not found|No such file|undefined!' \
+            /tmp/openwrt-make.log | tail -n 80 || true
+          echo "::endgroup::"
         fi
         [ "$rc" -eq 0 ] || exit "$rc"
         echo "status=success" >> $GITHUB_OUTPUT

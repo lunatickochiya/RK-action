@@ -95,6 +95,15 @@ OpenWrt 默认构建会把子 make 的 **stdout 和 stderr 一起**丢进 `/dev/
 - 不需要事后重试，也不存在“多线程构建里日志报错的包不一定是真正失败包”的问题；
 - 日志不会像 `V=s` 那样把每条编译命令都打出来，体积可控。
 
+两点降噪/汇总：
+
+- `WARNING: modpost: missing MODULE_DESCRIPTION()` 是无害警告，ALLKMOD 下几乎
+  一个模块一条，会淹没日志；实时输出里会过滤掉它（完整日志仍保存在
+  `/tmp/openwrt-make.log`）；
+- 编译失败时，从完整日志里汇总所有 `error:` / `Error N` / `ERROR:` /
+  `command not found` / `undefined!` 行，打印到 `失败汇总` group 里——
+  多线程构建里真正失败的包一定在其中，不需要猜。
+
 不再用 `make -j1 V=s` 兜底：那会把整个 world 从零重编，既耗光 5h55m 预算，
 又可能长时间没有任何输出。
 
