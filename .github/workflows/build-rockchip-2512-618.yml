@@ -301,7 +301,9 @@ jobs:
       if: env.Cache == '1' && !cancelled()
       uses: lunatickochiya/cachewrtbuild@save-on-failure
       with:
-        ccache: 'false'
+        # ccache 一起恢复：工具链缓存里可能带 build-toolchain-cache.yml 预热好的
+        # llvm/mesa 对象；paths 必须和保存端一致（含 .ccache），cache version 才匹配。
+        ccache: 'true'
         toolchain: 'true'
         skip: 'true'
         mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}

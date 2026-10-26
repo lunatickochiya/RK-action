@@ -98,6 +98,23 @@ OpenWrt 默认构建会把子 make 的 **stdout 和 stderr 一起**丢进 `/dev/
 不再用 `make -j1 V=s` 兜底：那会把整个 world 从零重编，既耗光 5h55m 预算，
 又可能长时间没有任何输出。
 
+### 在工具链缓存里预热 libmesa-panfrost（可选）
+
+`Build Toolchain Cache (Rockchip)` 新增 `panfrost` 选项（默认 `false`）。开启后，在
+`tools + toolchain` 编译完之后，会用一份**最小 `.config`**（只保留 `CONFIG_TARGET_*`
+和 `CONFIG_PACKAGE_libmesa-panfrost`）跑 `make world`（限时 3.5 小时），把内核依赖链、
+llvm、mesa 的编译产物写进 `.ccache`，并随工具链缓存一起保存。
+
+固件构建的「恢复工具链」步骤现在会连 `.ccache` 一起恢复（paths 必须和保存端一致，
+否则 actions/cache 的 cache version 对不上），所以：
+
+- 先跑一次 `panfrost=true` 的工具链缓存，再跑完整固件 → llvm/mesa 直接命中 ccache；
+- ccache 与机型无关（key 只含 patch_dir/工具链 hash/eBPF），同画像机型都能受益；
+- `llvm`/`mesa` 没开 `PKG_BUILD_PARALLEL`，是 **-j1** 构建，冷编 1~2 小时，预热可以省掉这段；
+- 工具链缓存会变大（约 +1~3GB，`CCACHE_MAXSIZE=3G`），GitHub 仓库总缓存 10GB，
+  条目会被 LRU 淘汰，必要时再跑一次预热；
+- Release 兜底包**不含** `.ccache`（Release 单文件 2GB 限制），缓存未命中时仍会冷编。
+
 ### 工具链缓存与 host 工具
 
 工具链缓存/Release 包是按 **工具链 workflow 自己的 `.config`** 编的（那份 `.config`

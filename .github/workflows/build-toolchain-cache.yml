@@ -48,6 +48,14 @@ on:
         options:
         - 'false'
         - 'true'
+      panfrost:
+        description: '顺带编译 libmesa-panfrost（llvm/mesa）并把 ccache 存进工具链缓存'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+        - 'false'
+        - 'true'
 
 env:
   TZ: Asia/Shanghai
@@ -63,6 +71,7 @@ jobs:
       Matrix_Target: rockchip-nftables
       Target_CFG_Machine: ${{ github.event.inputs.machine || 'ztl-joyrock' }}
       SFE_INPUT_STATUS: 'false'
+      PANFROST: ${{ github.event.inputs.panfrost || 'false' }}
 
     steps:
     - name: 检查
@@ -185,10 +194,32 @@ jobs:
         echo -e "$(nproc) thread toolchain compile"
         make -j$(nproc) tools/install toolchain/install
 
+    - name: 预热 libmesa-panfrost（llvm/mesa）
+      # 只保留 target/device + libmesa-panfrost，编出内核依赖链和 llvm/mesa，
+      # 产物进 .ccache；随后缓存步骤会把 .ccache 一起存进工具链缓存，
+      # 固件构建恢复工具链时就能直接命中（llvm/mesa 是 -j1 构建，冷编很慢）。
+      if: env.PANFROST == 'true'
+      working-directory: ./openwrt
+      env:
+        CCACHE_MAXSIZE: 3G
+      run: |
+        cp .config /tmp/toolchain.full.config
+        grep -E '^CONFIG_TARGET_' /tmp/toolchain.full.config > .config || true
+        cat >> .config <<'EOF'
+        CONFIG_CCACHE=y
+        CONFIG_PACKAGE_libmesa-panfrost=y
+        EOF
+        make -s defconfig
+        echo "mesa-only 配置："
+        grep -E 'CONFIG_PACKAGE_(libmesa-panfrost|llvm)=' .config || true
+        # 限时 3.5 小时（job 上限 330 分钟）；超时也保留已经编出来的 ccache
+        timeout 12600 make -j$(nproc) world || true
+        ccache -s || true
+
     - name: 保存工具链到 Actions 缓存
       uses: lunatickochiya/cachewrtbuild@save-on-failure
       with:
-        ccache: 'false'
+        ccache: 'true'
         toolchain: 'true'
         skip: 'true'
         mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
