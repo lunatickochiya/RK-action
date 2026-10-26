@@ -81,6 +81,38 @@ GitHub 托管 runner 的**单个 job** 上限是 6 小时（prepare job 不计�
 
 预算不够时（前面的克隆/feeds/下载耗时过长）会在编译开始前直接失败，同样是为了先保住缓存。
 
+### 编译失败时怎么直接看到真实报错
+
+OpenWrt 默认构建会把子 make 的 **stdout 和 stderr 一起**丢进 `/dev/null`
+（`include/verbose.mk` 的 `SILENT:=>/dev/null 2>&1`），所以日志里往往只剩
+`ERROR: package/xxx failed to build`，看不到是哪个文件、哪一行出错。
+
+`编译固件` 现在用 **`make ... V=1`**：对 OpenWrt 来说 `V=1` 等于 `V=w`，只会丢弃
+子 make 的 stdout（编译命令回显），**stderr 照常输出**。于是：
+
+- gcc/ld 的 `error:`、`modpost` 的 `ERROR:`、shell 的 `command not found`、
+  `make: *** [...] Error 1` 都会直接出现在 CI 日志里；
+- 不需要事后重试，也不存在“多线程构建里日志报错的包不一定是真正失败包”的问题；
+- 日志不会像 `V=s` 那样把每条编译命令都打出来，体积可控。
+
+不再用 `make -j1 V=s` 兜底：那会把整个 world 从零重编，既耗光 5h55m 预算，
+又可能长时间没有任何输出。
+
+### 工具链缓存与 host 工具
+
+工具链缓存/Release 包是按 **工具链 workflow 自己的 `.config`** 编的（那份 `.config`
+甚至可能不存在）。依赖配置的 tools 因此可能没被编进缓存，例如 `tools/b43-tools`；
+而固件构建在写 b43 固件时需要 `b43-fwsquash.py`，于是出现：
+
+```
+bash: line 1: b43-fwsquash.py: command not found
+make[3]: *** [.../kmod-b43-...apk] Error 127
+```
+
+`编译固件` 之前增加了 `补齐工具链缓存缺失的 host 工具` 步骤：按当前 `.config` 跑一次
+`make tools/install`。缓存里已有的工具都有 stamp，几秒结束；缺的工具现场补编，
+不用等下一次工具链缓存更新。
+
 ## 支持设备
 
 | MACH | 设备 | 说明 |

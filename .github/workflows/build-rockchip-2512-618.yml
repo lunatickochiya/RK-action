@@ -347,6 +347,18 @@ jobs:
       if: (!cancelled())
       run: df -hT
 
+    - name: 补齐工具链缓存缺失的 host 工具
+      # 工具链缓存/Release 包是按工具链 workflow 自己的 .config 编的（那份 .config
+      # 甚至可能不存在），所以依赖配置的 tools（b43-tools 等）可能没编进去：
+      #   bash: line 1: b43-fwsquash.py: command not found
+      #   make[3]: *** [.../kmod-b43-...apk] Error 127
+      # 这里按当前 .config 跑一次 tools/install：缓存里已有的工具都有 stamp，
+      # 几秒就结束；缺的工具现场补编，不用等下一次工具链缓存。
+      if: (!cancelled())
+      working-directory: ./openwrt
+      run: |
+        make -j$(($(nproc)+1)) tools/install
+
     - name: 编译固件
       id: compile
       working-directory: ./openwrt
@@ -367,7 +379,11 @@ jobs:
           exit 1
         fi
         set +e
-        timeout --signal=TERM --kill-after=60s "$budget" bash -c 'make -j$(($(nproc)+1)) || make -j1 V=s'
+        # V=1（=V=w）：OpenWrt 只丢弃子 make 的 stdout，stderr 照常输出——
+        # 编译错误、modpost 报错、make 的 *** Error 都会直接出现在日志里。
+        # 不再用 `make -j1 V=s` 兜底：那会把整个 world 从零重编，既耗光
+        # 5h55m 预算，又可能长时间没有任何输出。
+        timeout --signal=TERM --kill-after=60s "$budget" bash -c 'make -j$(($(nproc)+1)) V=1'
         rc=$?
         set -e
         if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then

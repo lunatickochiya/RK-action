@@ -796,12 +796,7 @@ fi
 
 
 function add_openwrt_kmods() {
-	# lite 机型（ztl-lite / mpc1917_lite）不编全量 kmod：
-	# 一是 6h 的 Action 时限撑不住；二是 ALLKMOD 还会把 kmod 的用户态依赖
-	# （rtpengine、coova-chilli、xt-tls 等）一起拖进构建，和 lite 的定位也不符。
-	if [[ "$Target_CFG_Machine" == *lite* ]]; then
-		echo "::notice ::$Target_CFG_Machine 为 lite 机型，跳过全量 kmod，只编配置里选中的 kmod"
-	else
+
 		if [[ "$OpenWrt_PATCH_FILE_DIR" == openwrt-2512-* ]]; then
 		add_all_kmod_config
 		cd openwrt && make defconfig && cd ../
@@ -810,7 +805,7 @@ function add_openwrt_kmods() {
 		add_all_kmod_config
 		cd openwrt && make defconfig && cd ../
 		fi
-	fi
+
 
 	fix_openwrt_config_eror
 	cd openwrt && make defconfig && cd ../
