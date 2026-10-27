@@ -39,4 +39,18 @@ apt-get install "${APT_OPTS[@]}" \
 
 apt-get clean
 
+# sccache：rust 的编译缓存（OpenWrt 的 CONFIG_RUST_SCCACHE 会走 RUSTC_WRAPPER=sccache）
+SCCACHE_VER=0.10.0
+if ! command -v sccache >/dev/null 2>&1; then
+	echo "[INFO] installing sccache ${SCCACHE_VER}"
+	if curl -fsSL --connect-timeout 10 --max-time 300 -o /tmp/sccache.tar.gz \
+		"https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VER}/sccache-v${SCCACHE_VER}-x86_64-unknown-linux-musl.tar.gz"; then
+		tar -xzf /tmp/sccache.tar.gz -C /tmp
+		install -m 0755 "/tmp/sccache-v${SCCACHE_VER}-x86_64-unknown-linux-musl/sccache" /usr/local/bin/sccache
+		rm -rf /tmp/sccache.tar.gz "/tmp/sccache-v${SCCACHE_VER}-x86_64-unknown-linux-musl"
+	else
+		echo "[WARNING] sccache 下载失败，rust 构建会稍慢（不影响功能）"
+	fi
+fi
+
 echo "[SUCCESS] build dependencies installed"

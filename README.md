@@ -316,6 +316,26 @@ openwrt-2512-618-rk/           # 6.18 需要套在源码树上的补丁/资源
 跑满超时，只缓存了部分 llvm/mesa。rust 是完全独立的一棵树（rustc 编译，ccache
 不适用），所以只能靠关掉 `RUBY_ENABLE_YJIT` 来避免。
 
+### rust 编译提速
+
+`rust/host`（rustc 自举 + LLVM）在 4 核 runner 上实测 **4h20m**（user 27506s），
+4 个可选方案，按收益从高到低：
+
+1. **彻底不用 rust**：关掉 `CONFIG_RUBY_ENABLE_YJIT`（ruby 的 YJIT 在 aarch64
+   默认开启，是 `rust/host` 的唯一触发点）。ruby/ssr-plus 照常编，只是少了 JIT。
+2. **单独预热 rust（推荐配合 3）**：用 `build-toolchain-cache.yml` 的 `rust=true`。
+   rust 单编能吃满 4 核（约 2h+）；在固件构建里和另外 4 个包抢 jobserver 时
+   只有 ~1.8 核，才会拖到 4h20m。
+3. **sccache（已启用）**：配置里 `CONFIG_RUST_SCCACHE=y`（OpenWrt 自带），
+   rustc 走 `RUSTC_WRAPPER=sccache`，缓存目录 `openwrt/.sccache`；
+   workflow 已把 `.sccache` 和 `.ccache` 一起存取，并在编译结束时打印
+   `sccache --show-stats`。
+   - 局限：rust 构建里的 LLVM 是 C++（不走 sccache），第一次仍要全编；
+     跨 run 命中后主要省 rustc 各 crate 的编译。
+4. **缓存 rust 的 build dir**（未做）：可以直接跳过 rust，但
+   `build_dir/.../host/rustc-1.96.0-src` 有几 GB，且固件端的工具链恢复
+   必须用相同的缓存 paths（否则 actions/cache version 对不上）。
+
 ### lite 机型与缓存预热
 
 ccache 的 cache key 是 `target + eBPF`（不含机型），所以同一 target 下 lite 和完整版**共用**

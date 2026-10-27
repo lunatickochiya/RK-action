@@ -336,6 +336,10 @@ jobs:
       with:
         ccache: 'true'
         toolchain: 'false'
+        # .sccache 是 rust 的编译缓存（CONFIG_RUST_SCCACHE 开启），
+        # 和 .ccache 一起存取；rustc 走 RUSTC_WRAPPER=sccache 命中。
+        extra_paths: |
+          .sccache
         mixkey: 618-${{ matrix.target }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
         skip_saving: ${{ env.CacheSave }}
@@ -402,6 +406,8 @@ jobs:
           exit 1
         fi
         [ "$rc" -eq 0 ] || exit "$rc"
+        # rust 的 sccache 命中率（没有 rust 构建时输出为 0）
+        sccache --show-stats 2>/dev/null | head -20 || true
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: 上传编译日志
