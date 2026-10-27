@@ -323,9 +323,11 @@ openwrt-2512-618-rk/           # 6.18 需要套在源码树上的补丁/资源
 
 1. **彻底不用 rust**：关掉 `CONFIG_RUBY_ENABLE_YJIT`（ruby 的 YJIT 在 aarch64
    默认开启，是 `rust/host` 的唯一触发点）。ruby/ssr-plus 照常编，只是少了 JIT。
-2. **单独预热 rust（推荐配合 3）**：用 `build-toolchain-cache.yml` 的 `rust=true`。
-   rust 单编能吃满 4 核（约 2h+）；在固件构建里和另外 4 个包抢 jobserver 时
-   只有 ~1.8 核，才会拖到 4h20m。
+2. **单独预热 rust**：用 `build-toolchain-cache.yml` 的 `rust=true`。
+   预热的最小配置会带上 `CONFIG_RUST_SCCACHE=y`，rust 独占 4 核编译（比在固件
+   构建里和 4 个包抢 jobserver 快得多，后者只有 ~1.8 核）；
+   预热产生的 `.sccache` 会和 `.ccache` 一起存进 **工具链缓存**，
+   固件端恢复工具链时（paths 含 `.sccache`）直接命中，rustc 各 crate 不再重编。
 3. **sccache（已启用）**：配置里 `CONFIG_RUST_SCCACHE=y`（OpenWrt 自带），
    rustc 走 `RUSTC_WRAPPER=sccache`，缓存目录 `openwrt/.sccache`；
    workflow 已把 `.sccache` 和 `.ccache` 一起存取，并在编译结束时打印

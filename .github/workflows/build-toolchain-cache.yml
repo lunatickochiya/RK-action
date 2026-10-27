@@ -219,6 +219,7 @@ jobs:
           if [ "${RUST:-false}" = 'true' ]; then
             echo 'CONFIG_PACKAGE_ruby=y'
             echo 'CONFIG_RUBY_ENABLE_YJIT=y'
+            echo 'CONFIG_RUST_SCCACHE=y'
           fi
         } > .config
         make -s defconfig
@@ -238,6 +239,9 @@ jobs:
         ccache: 'true'
         toolchain: 'true'
         skip: 'true'
+        # rust 预热时把 sccache 也存进工具链缓存，固件端恢复后可直接命中
+        extra_paths: |
+          .sccache
         mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
 
