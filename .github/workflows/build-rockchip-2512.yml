@@ -364,6 +364,9 @@ jobs:
         BUILD_JOB_STOP_SECONDS: '21300'
         CACHE_RESERVE_SECONDS: '300'
         BUILD_JOB_SETUP_MARGIN_SECONDS: '60'
+        # ccache 默认上限 5GB：内核先编、后面的包会把内核对象 LRU 挤掉，
+        # 导致每次内核都接近冷编（实测 40+ 分钟）。放宽到 10G。
+        CCACHE_MAXSIZE: '10G'
       run: |
         start=${BUILD_JOB_START_EPOCH:-$(date +%s)}
         elapsed=$(( $(date +%s) - start + BUILD_JOB_SETUP_MARGIN_SECONDS ))
@@ -410,6 +413,25 @@ jobs:
     - name: 检查空间使用情况
       if: (!cancelled())
       run: df -hT
+
+    - name: 清理旧缓存（每个 key 前缀只留最新 1 个）
+      # 每次构建都会存一个新的 ccache 快照（key 带时间戳），不清理会占满
+      # GitHub 仓库 10GB 配额（当前 7 个 ccache ≈ 9.6GB），把 tc-* 工具链缓存
+      # 挤掉、也挤掉各机型自己的旧快照。这里删掉同前缀的旧条目，只留最新一个。
+      if: always() && env.Cache == '1'
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        gh cache list --limit 100 --json id,key,createdAt \
+          --jq '.[] | [.createdAt, (.id|tostring), .key] | @tsv' \
+          | sort -r \
+          | awk -F'\t' '$3 ~ /-cache-openwrt-[0-9]+$/ {
+              base=$3; sub(/-[0-9]+$/, "", base);
+              if (seen[base]++ >= 1) print $2
+            }' \
+          | while read -r id; do [ -n "$id" ] && gh cache delete "$id" || true; done
 
     - name: 检查空间使用情况2
       if: (cancelled())

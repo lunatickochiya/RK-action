@@ -287,6 +287,28 @@ openwrt-2512-618-rk/           # 6.18 需要套在源码树上的补丁/资源
   `package-configs` 里的 `CONFIG_PACKAGE_node` 保持不变；`node-npm` 在 packages feed
   里不存在，`make defconfig` 会忽略它。
 
+### 为什么内核/包不是每次都能命中 ccache
+
+- ccache 默认上限是 **5GB**（OpenWrt 不设置 `CCACHE_MAXSIZE`）。内核每次最先编译，
+  后面的包会把内核对象按 LRU 挤掉；仓库里的 ccache 快照也正好在 5GB 左右
+  （压缩后 1.35GB），说明一直在满载淘汰；
+- ccache 只加速 **C/C++ 编译**：`modpost`、模块链接、打包这步（ALLKMOD 下 ~1200
+  个模块）每次都要跑，不能省；
+- 恢复的是**最新时间戳**那份快照，往往来自别的机型/别的裁剪配置，内核 `.config`
+  不完全一致时命中率会下降；
+- GitHub 仓库缓存总额 10GB，之前 7 个 ccache 快照就占了 9.6GB，连 `tc-*` 工具链
+  缓存都会被挤掉（挤掉后只能走 Release 兜底，甚至重编工具链）。
+
+对应措施：
+- `编译固件` 步骤设置 `CCACHE_MAXSIZE=10G`，让内核对象不被后续编译挤掉；
+- 每次构建结束执行“清理旧缓存”：同一 key 前缀只保留最新 1 份（现在 7 份 → 2 份，
+  腾出约 5~6GB），保证 `tc-*` 工具链缓存能长期存在。
+
+注意：`Build Toolchain Cache` 的 `panfrost=true` 只预热 **mesa/llvm**（用最小
+`.config`，不含 ruby/rust），而且它自身有 3.5 小时上限——上次 15:33→19:03 正好
+跑满超时，只缓存了部分 llvm/mesa。rust 是完全独立的一棵树（rustc 编译，ccache
+不适用），所以只能靠关掉 `RUBY_ENABLE_YJIT` 来避免。
+
 ### lite 机型与缓存预热
 
 ccache 的 cache key 是 `target + eBPF`（不含机型），所以同一 target 下 lite 和完整版**共用**
