@@ -118,9 +118,7 @@ function init_pkg_env() {
 	sudo bash "$repo_dir/scripts/init_build_environment.sh"
 	sudo -E apt-get -qq install libgnutls28-dev coccinelle libfuse-dev \
 	b43-fwcutter cups-ppdc python3-pip
-	pip3 install pyelftools
 
-	sudo npm install -g pnpm
 	clang --version
 
 	sudo timedatectl set-timezone "$TZ"
