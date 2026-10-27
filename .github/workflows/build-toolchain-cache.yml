@@ -232,6 +232,15 @@ jobs:
         fi
         timeout "$warm_timeout" make -j$(nproc) world || true
         ccache -s || true
+        # 如果本次编了 rust，把它的 stamp 收集到 .rust-stamps（只有几个文件），
+        # 固件端恢复后 make 会认为 rust/host 已完成，直接跳过 4h 的 rust 构建。
+        rust_build=$(ls -d build_dir/target-*/host/rustc-*-src 2>/dev/null | head -n1 || true)
+        if [ -n "$rust_build" ] && [ -f "$rust_build/.built" ]; then
+          mkdir -p ".rust-stamps/host/$(basename "$rust_build")"
+          cp -a "$rust_build"/.prepared* "$rust_build"/.configured "$rust_build"/.built \
+            ".rust-stamps/host/$(basename "$rust_build")/"
+          echo "已收集 rust stamps: $(basename "$rust_build")"
+        fi
 
     - name: 保存工具链到 Actions 缓存
       uses: lunatickochiya/cachewrtbuild@save-on-failure
@@ -239,9 +248,12 @@ jobs:
         ccache: 'true'
         toolchain: 'true'
         skip: 'true'
-        # rust 预热时把 sccache 也存进工具链缓存，固件端恢复后可直接命中
+        # rust 预热时把 sccache 和 rust 的编译 stamp 一起存进工具链缓存：
+        #   .sccache     —— rustc crate 缓存
+        #   .rust-stamps —— 只有几个 stamp，固件端恢复后 make 直接跳过 rust 构建
         extra_paths: |
           .sccache
+          .rust-stamps
         mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
 

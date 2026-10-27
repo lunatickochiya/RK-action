@@ -295,15 +295,17 @@ jobs:
       if: env.Cache == '1' && !cancelled()
       uses: lunatickochiya/cachewrtbuild@save-on-failure
       with:
-        # ccache/.sccache 一起恢复：工具链缓存里可能带 build-toolchain-cache.yml
-        # 预热好的 llvm/mesa 和 rust 对象；paths 必须和保存端完全一致
-        # （staging_dir/host*, staging_dir/tool*, .sccache, .ccache），
+        # ccache/.sccache/.rust-stamps 一起恢复：工具链缓存里可能带
+        # build-toolchain-cache.yml 预热好的 llvm/mesa、rust 对象和 rust 编译戳；
+        # paths 必须和保存端完全一致
+        # （staging_dir/host*, staging_dir/tool*, .sccache, .rust-stamps, .ccache），
         # actions/cache 的 version 才匹配。
         ccache: 'true'
         toolchain: 'true'
         skip: 'true'
         extra_paths: |
           .sccache
+          .rust-stamps
         mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
         skip_saving: 'true'
@@ -365,6 +367,23 @@ jobs:
           cp tools/b43-tools/files/b43-fwsquash.py staging_dir/host/bin/
           chmod +x staging_dir/host/bin/b43-fwsquash.py
           echo "已补齐 b43-fwsquash.py"
+        fi
+
+    - name: 恢复 rust 预编译戳（跳过 rust 重编）
+      # 工具链缓存里的 .rust-stamps 只包含 .prepared*/.configured/.built 几个文件。
+      # 复制到 build_dir 后，make 会认为 rust/host 已经编译完成（staging 里的
+      # .rust_installed 也在工具链缓存中），直接跳过 4h 的 rust 构建。
+      # 如果 rust 包内容变了（stamp 名里的 md5 变化），会自动回退到正常编译。
+      if: (!cancelled())
+      working-directory: ./openwrt
+      run: |
+        if [ -d .rust-stamps/host ]; then
+          for t in build_dir/target-*/; do
+            [ -d "$t" ] || continue
+            mkdir -p "$t/host"
+            cp -a .rust-stamps/host/. "$t/host/"
+          done
+          echo "已恢复 rust 编译戳: $(ls .rust-stamps/host)"
         fi
 
     - name: 编译固件

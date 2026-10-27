@@ -334,9 +334,14 @@ openwrt-2512-618-rk/           # 6.18 需要套在源码树上的补丁/资源
    `sccache --show-stats`。
    - 局限：rust 构建里的 LLVM 是 C++（不走 sccache），第一次仍要全编；
      跨 run 命中后主要省 rustc 各 crate 的编译。
-4. **缓存 rust 的 build dir**（未做）：可以直接跳过 rust，但
-   `build_dir/.../host/rustc-1.96.0-src` 有几 GB，且固件端的工具链恢复
-   必须用相同的缓存 paths（否则 actions/cache version 对不上）。
+4. **缓存 rust 编译戳（已实现，等价于“缓存 build dir”的轻量版）**：
+   `build-toolchain-cache.yml` 的 `rust=true` 预热完成后，把
+   `build_dir/target-*/host/rustc-*-src` 里的 `.prepared*/.configured/.built`
+   收集到 `.rust-stamps`（只有几个文件），随工具链缓存保存；
+   固件端恢复工具链后由“恢复 rust 预编译戳”步骤把 stamp 复制回 build_dir，
+   再配合缓存里 `staging_dir/host/stamp/.rust_installed` 和已安装的 rustc，
+   make 会直接跳过 rust 构建（0 秒）。
+   stamp 文件名带 rust 包内容的 md5，包一变就自动回退到正常编译，不会用错缓存。
 
 ### lite 机型与缓存预热
 
