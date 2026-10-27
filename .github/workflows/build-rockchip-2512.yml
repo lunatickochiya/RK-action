@@ -379,8 +379,10 @@ jobs:
         # 和本地 `make ... 2> compile.log` 一样是一份几十 KB 的报错日志。
         # CI 日志只有正常进度行（make[N] -C ...）和 time: 行。
         timeout --signal=TERM --kill-after=60s "$budget" \
-          bash -c 'make -j$(($(nproc)+1)) V=1' 2> compile.log
+          bash -c 'make -j$(($(nproc)+1)) V=1' \
+          2> >(gawk '{ print strftime("[%H:%M:%S]"), $0; fflush() }' > compile.log)
         rc=$?
+        sleep 1
         set -e
         if [ "$rc" -ne 0 ]; then
           # artifact 上传不跟随软链（openwrt -> /workdir/openwrt），失败时复制一份

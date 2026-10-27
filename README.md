@@ -108,7 +108,10 @@ stderr，文件通常只有几十 KB。
   是实打实的降速；
 - CI 日志只保留正常进度行（`make[N] -C ...`）和 `time:` 行，和默认构建一样；
 - **stderr 不进 CI 日志**，所以 `WARNING: modpost: missing MODULE_DESCRIPTION()`
-  这类无害警告不会刷屏，只在 compile.log 里。
+  这类无害警告不会刷屏，只在 compile.log 里；
+- compile.log 每行带 `[HH:MM:SS]` 时间戳（gawk 逐行加），从 artifact 就能看出
+  哪段时间没有输出、卡在哪个包上（配合 `+ cd .../build_dir/.../<pkg>-<ver>` 等
+  轨迹行定位）。
 
 编译失败（或触发 5h55m 超时）时，`compile.log` 作为 artifact 上传，
 名字是 `compile-log-<机型>-<target>`，保留 7 天。
@@ -274,6 +277,9 @@ openwrt-2512-618-rk/           # 6.18 需要套在源码树上的补丁/资源
 - 6.18 的所有机型都已经去掉 `luci-app-quickfile`：它会拉入 `quickfile`（Rust），
   进而触发 `rust/host-compile`，实测单次 **4 小时 20 分**（`time:` 行显示
   `#27506.58#1238.18#15605.60`），是 lite 构建超时的直接原因。需要它的 ipk 时再单独加回。
+- 另外所有配置都加了 `# CONFIG_RUBY_ENABLE_YJIT is not set`：`ruby` 的 YJIT
+  在 aarch64 上默认开启，`PKG_BUILD_DEPENDS` 会拉 `rust/host`，同样要编 4 小时以上；
+  构建用不到 YJIT，关掉后 `ruby`/`ssr-plus` 仍可正常编（只是少了 JIT）。
 - 三个 workflow 都已经**去掉自定义 node feed**（`nxhack/openwrt-node-packages`），
   改用 packages feed 自带的 `lang/node`：后者是 host-only、直接下载官方
   linux-x64 二进制，不编 v8；自定义 feed 的 node 是目标平台 Node.js，
