@@ -83,11 +83,16 @@ GitHub 托管 runner 的**单个 job** 上限是 6 小时（prepare job 不计�
 
 ### 编译日志与失败排查
 
-`编译固件` 用 `make ... V=s` 构建，但只把 **stderr** 写进 `openwrt/compile.log`
+`编译固件` 用 `make ... V=1`（OpenWrt 的 `V=1` 等于 `V=w`：子 make 以 `-s`
+运行，不回显每条命令）构建，并把 **stderr** 写进 `openwrt/compile.log`
 （`2> compile.log`）——和本地跑出来的一样，gcc/modpost/shell 的真实报错都在
-stderr，文件通常只有几十 KB，不会把每条编译命令都存下来。stdout 里的命令回显
-不进 CI 日志，只放行 `make[N] -C ...` 进度行和 `time:` 行，所以 action 页面
-看起来和默认（非 `V=s`）构建一样。
+stderr，文件通常只有几十 KB。
+
+- 不用 `V=s`：`V=s` 会把每条编译命令都 echo 出来，进程数和 I/O 明显增加，
+  是实打实的降速；
+- CI 日志只保留正常进度行（`make[N] -C ...`）和 `time:` 行，和默认构建一样；
+- **stderr 不进 CI 日志**，所以 `WARNING: modpost: missing MODULE_DESCRIPTION()`
+  这类无害警告不会刷屏，只在 compile.log 里。
 
 编译失败（或触发 5h55m 超时）时，`compile.log` 作为 artifact 上传，
 名字是 `compile-log-<机型>-<target>`，保留 7 天。
@@ -253,6 +258,8 @@ openwrt-2512-618-rk/           # 6.18 需要套在源码树上的补丁/资源
 - 6.18 的所有机型都已经去掉 `luci-app-quickfile`：它会拉入 `quickfile`（Rust），
   进而触发 `rust/host-compile`，实测单次 **4 小时 20 分**（`time:` 行显示
   `#27506.58#1238.18#15605.60`），是 lite 构建超时的直接原因。需要它的 ipk 时再单独加回。
+- `shimeta_aiot3588a_lite` 另外去掉了 `node`/`node-npm`：node 的 v8 在 4 核 runner 上
+  冷编约 **3 小时**（run 40423207106 里从 03:05 编到 05:51 还没完），lite 不需要它。
 
 ### lite 机型与缓存预热
 

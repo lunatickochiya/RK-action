@@ -380,15 +380,13 @@ jobs:
           exit 1
         fi
         set +e
-        # 和本地一样只把 stderr 写进 openwrt/compile.log（gcc/modpost/shell 的真实
-        # 报错都在这里，文件很小，几十 KB）；stdout 里的 V=s 命令回显不进 CI 日志，
-        # 只放行进度行，所以 action 页面看起来和没开 V=s 一样。
-        set -o pipefail
+        # V=1（=V=w）：子 make 以 -s 运行、不回显每条命令（没有 V=s 的降速/海量输出），
+        # stdout 照常丢弃，只保留 stderr；把 stderr 写进 openwrt/compile.log，
+        # 和本地 `make ... 2> compile.log` 一样是一份几十 KB 的报错日志。
+        # CI 日志只有正常进度行（make[N] -C ...）和 time: 行。
         timeout --signal=TERM --kill-after=60s "$budget" \
-          bash -c 'make -j$(($(nproc)+1)) V=s' 2> compile.log \
-          | grep --line-buffered -E 'make\[[0-9]+\] -C |^time: '
-        rc=${PIPESTATUS[0]}
-        set +o pipefail
+          bash -c 'make -j$(($(nproc)+1)) V=1' 2> compile.log
+        rc=$?
         set -e
         if [ "$rc" -ne 0 ]; then
           # artifact 上传不跟随软链（openwrt -> /workdir/openwrt），失败时复制一份
