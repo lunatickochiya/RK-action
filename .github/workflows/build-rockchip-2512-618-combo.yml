@@ -1,0 +1,838 @@
+name: Build Rockchip 25.12 (Linux 6.18) — 工具链 + 固件
+
+# 把 build-toolchain-cache.yml 和 build-rockchip-2512-618.yml 合并成一个工作流：
+#   1) job toolchain：检查工具链缓存；auto 命中就跳过构建，miss（或 tc_mode=rebuild）
+#      才编 tools + toolchain，可选预热 llvm/mesa（panfrost）和 ruby/rust（rust），
+#      结果存 Actions 缓存 + Release；
+#   2) job build：matrix 编译固件，工具链直接复用 job 1 刚保存的缓存（同一 key），
+#      不用再单独跑一次 Build Toolchain Cache。
+#
+# 注意：job 1 有自己的 330 分钟上限，job 2 有 720 分钟（实际由 5h55m 保护提前失败）。
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      MACH:
+        description: 'Choose machine'
+        required: true
+        default: 'ztl-joyrock'
+        type: choice
+        options:
+        - 'ztl-joyrock'
+        - 'ztl-lite'
+        - 'mpc1917'
+        - 'mpc1917_lite'
+        - 'fmx1_pro'
+        - 'shimeta_aiot3588a'
+        - 'shimeta_aiot3588a_lite'
+      SETIP:
+        description: 'Set LAN IP address'
+        default: '192.168.6.1'
+        required: false
+      SFE_BUILDIN:
+        description: 'Build sfe'
+        default: 'true'
+        type: choice
+        options:
+        - 'true'
+        - 'false'
+      patch_repo:
+        description: 'Patch options (json), see README'
+        required: true
+        default: '{"BCM_FULLCONE": "1", "TRY_BBR_V3": "1", "TEST_KERNEL": "0", "ADD_eBPF": "0", "ADD_IB": "1", "ADD_SDK": "1"}'
+      config_repo:
+        description: 'Build/upload options (json), see README'
+        required: true
+        default: '{"Cache": "1", "CacheSave": "false", "CacheSaveOnFailure": "true", "UPLOAD_RELEASE": "1", "ALLKMOD": "1"}'
+      tc_mode:
+        description: '工具链：auto=有缓存就跳过，rebuild=总是重建'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+        - 'auto'
+        - 'rebuild'
+      panfrost:
+        description: '重建工具链时顺带预热 libmesa-panfrost（llvm/mesa）'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+        - 'false'
+        - 'true'
+      rust:
+        description: '重建工具链时顺带预热 ruby/rust（rustc）'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+        - 'false'
+        - 'true'
+
+env:
+  TZ: Asia/Shanghai
+  OpenWrt_PATCH_FILE_DIR: openwrt-2512-618-rk
+  KERNEL66_REPO_TOKEN: ${{ secrets.MY_SECRET_TOKEN }}
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      machine: ${{ steps.set-matrix.outputs.machine }}
+    env:
+      Target_CFG_Machine: ${{ github.event.inputs.MACH || github.event.client_payload.MACH }}
+    steps:
+      - name: 检查
+        uses: actions/checkout@main
+
+      - name: 解析构建矩阵
+        # 参考 AP-action-IPQ：单 job 解析机型 -> target，不再为每个机型各跑一份 prepare
+        id: set-matrix
+        run: bash "$GITHUB_WORKSPACE/core.sh" resolve-build-matrix
+
+  toolchain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    name: Toolchain（合并流程）
+    env:
+      OpenWrt_PATCH_FILE_DIR: openwrt-2512-618-rk
+      Matrix_Target: rockchip-nftables
+      Target_CFG_Machine: ${{ github.event.inputs.MACH }}
+      SFE_INPUT_STATUS: 'false'
+      PANFROST: ${{ github.event.inputs.panfrost || 'false' }}
+      RUST: ${{ github.event.inputs.rust || 'false' }}
+      TC_MODE: ${{ github.event.inputs.tc_mode || 'auto' }}
+
+    steps:
+    - name: 检查
+      uses: actions/checkout@main
+
+    - name: 释放Ubuntu磁盘空间
+      uses: endersonmenezes/free-disk-space@v2
+      with:
+        remove_android: true
+        remove_dotnet: true
+        remove_haskell: true
+        remove_tool_cache: true
+        remove_swap: true
+        remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
+        remove_packages_one_command: true
+        remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/share/glade* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell"
+        testing: false
+
+    - name: 初始化环境
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        chmod +x gen-sha256sum.sh core.sh diy-2512-rk.sh after_build.sh refineconfig.sh
+        $GITHUB_WORKSPACE/core.sh init-pkg-env
+
+    - name: 设置GITHUB_ENV
+      id: env
+      env:
+        PATCH_JSON_INPUT: '{"BCM_FULLCONE": "0", "TRY_BBR_V3": "0", "TEST_KERNEL": "0", "ADD_eBPF": "0"}'
+        CONFIG_JSON_INPUT: '{"Cache": "0", "CacheSave": "false", "CacheSaveOnFailure": "true", "UPLOAD_RELEASE": "0", "ALLKMOD": "0"}'
+        INPUT_EBPF: ${{ fromJSON(github.event.inputs.patch_repo).ADD_eBPF == '1' && 'true' || 'false' }}
+      run: |
+        if [ "$INPUT_EBPF" = "true" ]; then
+          PATCH_JSON_INPUT=$(echo "$PATCH_JSON_INPUT" | jq '.ADD_eBPF="1"')
+          export PATCH_JSON_INPUT
+          echo "eBPF enabled: $PATCH_JSON_INPUT"
+        fi
+        $GITHUB_WORKSPACE/core.sh init-gh-env-2512-rk
+
+    - name: 克隆源代码
+      working-directory: /workdir
+      id: clone
+      env:
+        GIT_TERMINAL_PROMPT: '0'
+      run: |
+        df -hT $PWD
+        # token 走 HTTP Authorization 头（同 actions/checkout 的做法；对 git 版本/重定向更稳），
+        # 失败再退回 env 文件里的 REPO_URL（URL 内嵌 token）形式。
+        token_part="${REPO_URL#https://}"; token_part="${token_part%@*}"
+        clone_url="https://${REPO_URL#*@}"
+        echo "REPO_URL length: ${#REPO_URL} / token part length: ${#token_part} / job token length: ${#KERNEL66_REPO_TOKEN}"
+        echo "REPO_URL sha256: $(printf '%s' "$REPO_URL" | sha256sum | cut -d' ' -f1)"
+        if [ -z "$KERNEL66_REPO_TOKEN" ]; then
+          echo "::error ::KERNEL66_REPO_TOKEN 为空，请检查仓库 secret MY_SECRET_TOKEN"
+          exit 1
+        fi
+        auth_header="AUTHORIZATION: Basic $(printf 'x-access-token:%s' "$KERNEL66_REPO_TOKEN" | base64 -w0)"
+        if ! git -c "http.https://github.com/.extraheader=${auth_header}" \
+            clone "$clone_url" -b "$REPO_BRANCH" openwrt --single-branch; then
+          echo "::warning ::extraheader 方式克隆失败，改用 REPO_URL（内嵌 token）重试"
+          rm -rf openwrt
+          git clone "$REPO_URL" -b "$REPO_BRANCH" openwrt --single-branch
+        fi
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        cd openwrt
+        git config --global user.email "LunaticKochiya@github.com"
+        git config --global user.name "LunaticKochiya"
+        sed -i \
+          -e 's|https://git.openwrt.org/feed/packages.git;openwrt-25.12|https://github.com/openwrt/packages.git;openwrt-25.12|' \
+          -e 's|https://git.openwrt.org/project/luci.git;openwrt-25.12|https://github.com/openwrt/luci.git;openwrt-25.12|' \
+          -e 's|https://git.openwrt.org/feed/routing.git;openwrt-25.12|https://github.com/openwrt/routing.git;openwrt-25.12|' \
+          -e 's|https://git.openwrt.org/feed/telephony.git;openwrt-25.12|https://github.com/openwrt/telephony.git;openwrt-25.12|' \
+          feeds.conf.default
+        sed -i '$a src-git lunatic7 https://github.com/lunatickochiya/luna-action-packages.git' feeds.conf.default
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: Patch 自定义
+      id: patch
+      run: |
+        $GITHUB_WORKSPACE/core.sh init-openwrt-patch-2512-rk
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 自定义安装包(优先于feeds)
+      id: files
+      run: |
+        $GITHUB_WORKSPACE/core.sh add-openwrt-files-2512-rk
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 更新 & 安装 feeds
+      id: feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+        (cp -r $GITHUB_WORKSPACE/$OpenWrt_PATCH_FILE_DIR/feeds-replace/luci/* feeds/luci/ && echo "luci-lib-docker Re-add")
+        rm -rf feeds/luci.index
+        (rm -rf feeds/packages/lang/golang && cp -r $GITHUB_WORKSPACE/$OpenWrt_PATCH_FILE_DIR/feeds-packages-replace/* feeds/packages/ && echo "Golang Replaced")
+        rm -rf feeds/packages.index
+        grep -q -- '--ci false \\' feeds/packages/lang/rust/Makefile || sed -i '/x\.py \\/a \        --ci false \\' feeds/packages/lang/rust/Makefile
+        ./scripts/feeds update luci packages
+        ./scripts/feeds install -a
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 自定义配置（修复feeds）
+      id: config
+      run: |
+        $GITHUB_WORKSPACE/core.sh fix-openwrt-feeds
+        cd openwrt
+        rm -rf feeds/telephony.index
+        ./scripts/feeds update telephony
+        ./scripts/feeds install -a
+        cd ../
+
+    - name: 检查工具链缓存
+      # auto 模式下命中就直接跳过 tools/toolchain 编译（只做恢复），
+      # rebuild 模式总是重建。
+      id: tc_check
+      uses: lunatickochiya/cachewrtbuild@save-on-failure
+      with:
+        ccache: 'true'
+        toolchain: 'true'
+        skip: 'true'
+        extra_paths: |
+          .sccache
+          .rust-stamps
+        mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
+        prefix: ${{ github.workspace }}/openwrt
+        skip_saving: 'true'
+
+    - name: 编译 tools + toolchain
+      if: (env.TC_MODE == 'rebuild' || steps.tc_check.outputs.hit != '1')
+      working-directory: ./openwrt
+      run: |
+        echo -e "$(nproc) thread toolchain compile"
+        make -j$(nproc) tools/install toolchain/install
+
+    - name: 预热 libmesa-panfrost / ruby+rust
+      if: (env.TC_MODE == 'rebuild' || steps.tc_check.outputs.hit != '1') && (env.PANFROST == 'true' || env.RUST == 'true')
+      # 用最小 .config 只编需要预热的东西，产物进 .ccache；随后缓存步骤会把
+      # .ccache 一起存进工具链缓存，固件构建恢复工具链时就能直接命中。
+      #   panfrost=true：libmesa-panfrost → llvm/mesa（-j1 构建，冷编很慢）
+      #   rust=true    ：ruby + RUBY_ENABLE_YJIT=true → rust/host（rustc，约 4h）
+      working-directory: ./openwrt
+      env:
+        CCACHE_MAXSIZE: 3G
+      run: |
+        cp .config /tmp/toolchain.full.config
+        {
+          grep -E '^CONFIG_TARGET_' /tmp/toolchain.full.config || true
+          echo 'CONFIG_CCACHE=y'
+          if [ "${PANFROST:-false}" = 'true' ]; then
+            echo 'CONFIG_PACKAGE_libmesa-panfrost=y'
+          fi
+          if [ "${RUST:-false}" = 'true' ]; then
+            echo 'CONFIG_PACKAGE_ruby=y'
+            echo 'CONFIG_RUBY_ENABLE_YJIT=y'
+            echo 'CONFIG_RUST_SCCACHE=y'
+          fi
+        } > .config
+        make -s defconfig
+        echo "预热配置："
+        grep -E 'CONFIG_PACKAGE_(libmesa-panfrost|ruby)=|CONFIG_RUBY_ENABLE_YJIT|CONFIG_PACKAGE_llvm=' .config || true
+        # 限时：只预热 panfrost 时 3.5h；带 rust 时 4h（rust 单编约 4h，job 上限 330min）
+        warm_timeout=12600
+        if [ "${RUST:-false}" = 'true' ]; then
+          warm_timeout=14400
+        fi
+        timeout "$warm_timeout" make -j$(nproc) world || true
+        ccache -s || true
+        # 如果本次编了 rust，把它的 stamp 收集到 .rust-stamps（只有几个文件），
+        # 固件端恢复后 make 会认为 rust/host 已完成，直接跳过 4h 的 rust 构建。
+        rust_build=$(ls -d build_dir/target-*/host/rustc-*-src 2>/dev/null | head -n1 || true)
+        if [ -n "$rust_build" ] && [ -f "$rust_build/.built" ]; then
+          mkdir -p ".rust-stamps/host/$(basename "$rust_build")"
+          cp -a "$rust_build"/.prepared* "$rust_build"/.configured "$rust_build"/.built \
+            ".rust-stamps/host/$(basename "$rust_build")/"
+          echo "已收集 rust stamps: $(basename "$rust_build")"
+        fi
+
+    - name: 保存工具链到 Actions 缓存
+      if: (env.TC_MODE == 'rebuild' || steps.tc_check.outputs.hit != '1')
+      uses: lunatickochiya/cachewrtbuild@save-on-failure
+      with:
+        ccache: 'true'
+        toolchain: 'true'
+        skip: 'true'
+        # rust 预热时把 sccache 和 rust 的编译 stamp 一起存进工具链缓存：
+        #   .sccache     —— rustc crate 缓存
+        #   .rust-stamps —— 只有几个 stamp，固件端恢复后 make 直接跳过 rust 构建
+        extra_paths: |
+          .sccache
+          .rust-stamps
+        mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
+        prefix: ${{ github.workspace }}/openwrt
+
+    - name: 上传工具链到 Release
+      if: (env.TC_MODE == 'rebuild' || steps.tc_check.outputs.hit != '1')
+      working-directory: ./openwrt
+      env:
+        GH_TOKEN: ${{ github.token }}
+        # working-directory 是 /workdir/openwrt（源码仓库），不指定的话 gh 会把
+        # origin 当成 openwrt-ipq-2410（私有）→ 404；这里显式指向当前仓库。
+        GH_REPO: ${{ github.repository }}
+      run: |
+        command -v zstd >/dev/null || sudo apt-get install -y -qq zstd
+        TC_HASH=$(git log --pretty=tformat:"%h" -n1 tools toolchain)
+        TC_SUFFIX="${eBPF:-}"
+        ASSET="toolchain-${OpenWrt_PATCH_FILE_DIR}${TC_SUFFIX}-${TC_HASH}.tar.zst"
+        echo "toolchain hash: $TC_HASH"
+        tar -cf - staging_dir/host* staging_dir/tool* | zstd -3 -T0 -q -o "/tmp/$ASSET"
+        ls -lh "/tmp/$ASSET"
+        gh release view toolchain-cache >/dev/null 2>&1 || \
+          gh release create toolchain-cache --title "Toolchain cache" \
+            --notes "RK-action 预编译工具链（build-toolchain-cache.yml 自动上传）"
+        gh release upload toolchain-cache "/tmp/$ASSET" --clobber
+        echo "上传完成：toolchain-cache / $ASSET"
+
+  build:
+    runs-on: Ubuntu-24.04
+    needs: [prepare, toolchain]
+    timeout-minutes: 720
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    name: Build ${{ needs.prepare.outputs.machine }} openwrt 25.12 (Linux 6.18) ${{ matrix.target }}
+    env:
+      Matrix_Target: ${{ matrix.target }}
+      Target_CFG_Machine: ${{ needs.prepare.outputs.machine }}
+      OpenWrt_PATCH_FILE_DIR: openwrt-2512-618-rk
+      SFE_INPUT_STATUS: ${{ github.event.inputs.SFE_BUILDIN || 'true' }}
+
+    steps:
+    - name: 记录 build job 开始时间
+      # 6h 是 build job 的总时限（prepare job 不计入）。编译步骤从这里算剩余预算，
+      # 到 5h55m 主动失败，让 post 缓存步骤有时间跑（cancelled 状态下不会保存缓存）。
+      run: echo "BUILD_JOB_START_EPOCH=$(date +%s)" >> "$GITHUB_ENV"
+
+    - name: 检查
+      uses: actions/checkout@main
+
+    - name: 检查服务器配置
+      run: |
+        echo -e "------------------------------- CPU信息 -------------------------------\n"
+        echo "CPU物理数量:$(cat /proc/cpuinfo| grep "physical id"| sort| uniq| wc -l)"
+        echo -e "CPU核心及版本信息: $(cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c) \n"
+        echo -e "------------------------------- 内存信息 -------------------------------\n"
+        echo "已安装内存详细信息: "
+        sudo lshw -short -C memory | grep GiB
+        echo -e "\n"
+        echo -e "------------------------------- 磁盘信息 -------------------------------\n"
+        echo "磁盘数量: $(ls /dev/sd* | grep -v [1-9] | wc -l) \n"
+        echo "磁盘详情:"
+        df -Th
+
+    - name: 释放Ubuntu磁盘空间
+      uses: endersonmenezes/free-disk-space@v2
+      with:
+        remove_android: true
+        remove_dotnet: true
+        remove_haskell: true
+        remove_tool_cache: true
+        remove_swap: true
+        remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
+        remove_packages_one_command: true
+        remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/share/glade* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell"
+        testing: false
+
+    - name: 检查空间使用情况
+      if: (!cancelled())
+      run: df -hT
+
+    - name: 初始化环境
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        chmod +x gen-sha256sum.sh core.sh diy-2512-rk.sh after_build.sh refineconfig.sh
+        $GITHUB_WORKSPACE/core.sh init-pkg-env
+
+    - name: 设置GITHUB_ENV
+      id: env
+      env:
+        PATCH_JSON_INPUT: ${{ github.event.inputs.patch_repo }}
+        CONFIG_JSON_INPUT: ${{ github.event.inputs.config_repo }}
+      run: |
+        echo ${{matrix.target}}
+        $GITHUB_WORKSPACE/core.sh init-gh-env-2512-rk
+
+    - name: 克隆源代码
+      working-directory: /workdir
+      id: clone
+      env:
+        GIT_TERMINAL_PROMPT: '0'
+      run: |
+        df -hT $PWD
+        # token 走 HTTP Authorization 头（同 actions/checkout 的做法；对 git 版本/重定向更稳），
+        # 失败再退回 env 文件里的 REPO_URL（URL 内嵌 token）形式。
+        token_part="${REPO_URL#https://}"; token_part="${token_part%@*}"
+        clone_url="https://${REPO_URL#*@}"
+        echo "REPO_URL length: ${#REPO_URL} / token part length: ${#token_part} / job token length: ${#KERNEL66_REPO_TOKEN}"
+        echo "REPO_URL sha256: $(printf '%s' "$REPO_URL" | sha256sum | cut -d' ' -f1)"
+        if [ -z "$KERNEL66_REPO_TOKEN" ]; then
+          echo "::error ::KERNEL66_REPO_TOKEN 为空，请检查仓库 secret MY_SECRET_TOKEN"
+          exit 1
+        fi
+        auth_header="AUTHORIZATION: Basic $(printf 'x-access-token:%s' "$KERNEL66_REPO_TOKEN" | base64 -w0)"
+        if ! git -c "http.https://github.com/.extraheader=${auth_header}" \
+            clone "$clone_url" -b "$REPO_BRANCH" openwrt --single-branch; then
+          echo "::warning ::extraheader 方式克隆失败，改用 REPO_URL（内嵌 token）重试"
+          rm -rf openwrt
+          git clone "$REPO_URL" -b "$REPO_BRANCH" openwrt --single-branch
+        fi
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        cd openwrt
+        git config --global user.email "LunaticKochiya@github.com"
+        git config --global user.name "LunaticKochiya"
+        sed -i \
+          -e 's|https://git.openwrt.org/feed/packages.git;openwrt-25.12|https://github.com/openwrt/packages.git;openwrt-25.12|' \
+          -e 's|https://git.openwrt.org/project/luci.git;openwrt-25.12|https://github.com/openwrt/luci.git;openwrt-25.12|' \
+          -e 's|https://git.openwrt.org/feed/routing.git;openwrt-25.12|https://github.com/openwrt/routing.git;openwrt-25.12|' \
+          -e 's|https://git.openwrt.org/feed/telephony.git;openwrt-25.12|https://github.com/openwrt/telephony.git;openwrt-25.12|' \
+          feeds.conf.default
+        sed -i '$a src-git lunatic7 https://github.com/lunatickochiya/luna-action-packages.git' feeds.conf.default
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 增加磁盘空间
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        $GITHUB_WORKSPACE/core.sh ln-openwrt
+
+    - name: Patch 自定义
+      id: patch
+      run: |
+        $GITHUB_WORKSPACE/core.sh init-openwrt-patch-2512-rk
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 添加 SFE
+      if: env.SFE_INPUT_STATUS == 'true'
+      id: sfe
+      run: |
+        $GITHUB_WORKSPACE/core.sh add-openwrt-sfe-2512-rk
+        echo "status=success" >> $GITHUB_OUTPUT
+        echo "SFE=_SFE" >> $GITHUB_ENV
+
+    - name: 自定义安装包(优先于feeds)
+      if: steps.clone.outputs.status == 'success'
+      id: files
+      run: |
+        $GITHUB_WORKSPACE/core.sh add-openwrt-files-2512-rk
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 设置 IP 地址
+      if: github.event.inputs.SETIP != '' && github.event.inputs.SETIP != '192.168.10.1'
+      id: setip
+      run: |
+        IPSET_VALUE="${{ github.event.inputs.SETIP }}"
+        # uci-defaults 里 25.12 起的默认 LAN IP 是 192.168.10.1（/24 那行也是），
+        # 旧脚本这里写的是 192.168.66.1 —— 从不命中，SETIP 一直被忽略。
+        sed -i "s/192\.168\.10\.1/$IPSET_VALUE/g" openwrt/package/kochiya/autoset/files/def_uci/zzz-autoset*
+        grep -n 'lan_ipaddr=\|set network.lan.ipaddr=' openwrt/package/kochiya/autoset/files/def_uci/zzz-autoset-rockchip*
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 更新 & 安装 feeds
+      if: steps.files.outputs.status == 'success'
+      id: feeds
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+        (cp -r $GITHUB_WORKSPACE/$OpenWrt_PATCH_FILE_DIR/feeds-replace/luci/* feeds/luci/ && echo "luci-lib-docker Re-add")
+        rm -rf feeds/luci.index
+        (rm -rf feeds/packages/lang/golang && cp -r $GITHUB_WORKSPACE/$OpenWrt_PATCH_FILE_DIR/feeds-packages-replace/* feeds/packages/ && echo "Golang Replaced")
+        rm -rf feeds/packages.index
+        grep -q -- '--ci false \\' feeds/packages/lang/rust/Makefile || sed -i '/x\.py \\/a \        --ci false \\' feeds/packages/lang/rust/Makefile
+        ./scripts/feeds update luci packages
+        ./scripts/feeds install -a
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 自定义配置（修复feeds）
+      if: steps.feeds.outputs.status == 'success'
+      id: config
+      run: |
+        $GITHUB_WORKSPACE/core.sh fix-openwrt-feeds
+        cd openwrt
+        rm -rf feeds/telephony.index
+        ./scripts/feeds update telephony
+        ./scripts/feeds install -a
+        cd ../
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 添加kmod
+      if: steps.config.outputs.status == 'success' && env.ALLKMOD == '1'
+      id: config2
+      run: |
+        $GITHUB_WORKSPACE/core.sh add-openwrt-kmods
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: Run awk command
+      if: steps.config.outputs.status == 'success'
+      working-directory: ./openwrt
+      run: |
+        echo "------------------------"
+        awk '/CONFIG_LINUX/ { print }' .config
+        awk '/${{matrix.target}}/ { print }' .config
+        awk '/${{ needs.prepare.outputs.machine }}/ { print }' .config
+        echo "------------------------"
+        awk '/docker/ { print }' .config
+        echo "------------------------"
+        awk '/DOCKER/ { print }' .config
+        echo "------------------------"
+        awk '/store/ { print }' .config
+        echo "------------------------"
+        awk '/perl/ { print }' .config
+        echo "------------------------"
+        awk '/dnsmasq/ { print }' .config
+        echo "------------------------"
+        awk '/nft/ { print }' .config
+        echo "------------------------"
+        awk '/firewall/ { print }' .config
+        echo "------------------------"
+        awk '/fullcone/ { print }' .config
+        echo "------------------------"
+        awk '/CONFIG_PACKAGE_kmod/ { print }' .config
+        echo "------------------------"
+        awk '/turboacc/ { print }' .config
+
+    - name: 下载包文件
+      if: steps.config.outputs.status == 'success'
+      run: |
+        cd openwrt
+        # 个别包（如 arm-trusted-firmware-rockchip-vendor 的 mirror hash 校验）下载阶段会报错，
+        # 但构建时会用 git 回退拿到源码，这里不让下载阶段的失败阻断构建。
+        make download -j$(nproc) || true
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: 恢复工具链（Actions 缓存）
+      # 由 build-toolchain-cache.yml 预先编好并缓存（key 里带 tools/toolchain 的 git hash），
+      # 命中时 fetch 会顺手改 Makefile 跳过工具链编译。
+      id: tc_cache
+      if: env.Cache == '1' && !cancelled()
+      uses: lunatickochiya/cachewrtbuild@save-on-failure
+      with:
+        # ccache/.sccache/.rust-stamps 一起恢复：工具链缓存里可能带
+        # build-toolchain-cache.yml 预热好的 llvm/mesa、rust 对象和 rust 编译戳；
+        # paths 必须和保存端完全一致
+        # （staging_dir/host*, staging_dir/tool*, .sccache, .rust-stamps, .ccache），
+        # actions/cache 的 version 才匹配。
+        ccache: 'true'
+        toolchain: 'true'
+        skip: 'true'
+        extra_paths: |
+          .sccache
+          .rust-stamps
+        mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
+        prefix: ${{ github.workspace }}/openwrt
+        skip_saving: 'true'
+
+    - name: 恢复工具链（Release 兜底）
+      # 缓存未命中（过期/被清理/首次）时，从 Release 的 toolchain-cache 拉同名 asset。
+      # asset 名带 tools/toolchain 的 git hash，hash 不一致就跳过，避免用错版本。
+      if: steps.tc_cache.outputs.hit != '1'
+      working-directory: ./openwrt
+      env:
+        GH_TOKEN: ${{ github.token }}
+        # 同工具链工作流：显式指向本仓库，避免 gh 拿 openwrt 的 origin 去查 release
+        GH_REPO: ${{ github.repository }}
+      run: |
+        command -v zstd >/dev/null || sudo apt-get install -y -qq zstd
+        TC_HASH=$(git log --pretty=tformat:"%h" -n1 tools toolchain)
+        TC_SUFFIX="${eBPF:-}"
+        ASSET="toolchain-${OpenWrt_PATCH_FILE_DIR}${TC_SUFFIX}-${TC_HASH}.tar.zst"
+        if gh release download toolchain-cache -p "$ASSET" -D /tmp --clobber 2>/dev/null; then
+          echo "从 Release 恢复工具链：$ASSET"
+          tar --zstd -xf "/tmp/$ASSET" -C .
+          sed -i 's/ $(tool.*\/stamp-compile)//;' Makefile
+          sed -i 's/ $(tool.*\/stamp-install)//;' Makefile
+        else
+          echo "::notice ::未找到 $ASSET，本次现场编译工具链（可先跑 Build Toolchain Cache workflow）"
+        fi
+
+    - name: 缓存staging
+      # 工具链由 build-toolchain-cache.yml 单独缓存/发布（见上面的恢复步骤），
+      # 这里只缓存 .ccache（toolchain: 'false'）。fork 的 post-if 读 env
+      # CACHEWRT_SAVE_ON_FAILURE，编译失败也会保存 ccache。
+      uses: lunatickochiya/cachewrtbuild@save-on-failure
+      if: env.Cache == '1' && !cancelled()
+      with:
+        ccache: 'true'
+        toolchain: 'false'
+        # .sccache 是 rust 的编译缓存（CONFIG_RUST_SCCACHE 开启），
+        # 和 .ccache 一起存取；rustc 走 RUSTC_WRAPPER=sccache 命中。
+        extra_paths: |
+          .sccache
+        mixkey: 618-${{ matrix.target }}${{ env.eBPF }}
+        prefix: ${{ github.workspace }}/openwrt
+        skip_saving: ${{ env.CacheSave }}
+
+    - name: 检查空间使用情况
+      if: (!cancelled())
+      run: df -hT
+
+    - name: 补齐 b43-fwsquash.py
+      # 工具链缓存里可能没有 tools/b43-tools（工具链 workflow 的 .config 不一定选了
+      # kmod-b43），而 mac80211 写 b43 固件时要用 b43-fwsquash.py。
+      # 它是纯 python 脚本、不需要编译，直接拷一个即可——不要用 `make tools/install`，
+      # 那会把一堆 host 工具重编一遍，白白多花十几分钟。
+      if: (!cancelled())
+      working-directory: ./openwrt
+      run: |
+        if [ ! -x staging_dir/host/bin/b43-fwsquash.py ] && [ -f tools/b43-tools/files/b43-fwsquash.py ]; then
+          mkdir -p staging_dir/host/bin
+          cp tools/b43-tools/files/b43-fwsquash.py staging_dir/host/bin/
+          chmod +x staging_dir/host/bin/b43-fwsquash.py
+          echo "已补齐 b43-fwsquash.py"
+        fi
+
+    - name: 恢复 rust 预编译戳（跳过 rust 重编）
+      # 工具链缓存里的 .rust-stamps 只包含 .prepared*/.configured/.built 几个文件。
+      # 复制到 build_dir 后，make 会认为 rust/host 已经编译完成（staging 里的
+      # .rust_installed 也在工具链缓存中），直接跳过 4h 的 rust 构建。
+      # 如果 rust 包内容变了（stamp 名里的 md5 变化），会自动回退到正常编译。
+      if: (!cancelled())
+      working-directory: ./openwrt
+      run: |
+        if [ -d .rust-stamps/host ]; then
+          for t in build_dir/target-*/; do
+            [ -d "$t" ] || continue
+            mkdir -p "$t/host"
+            cp -a .rust-stamps/host/. "$t/host/"
+          done
+          echo "已恢复 rust 编译戳: $(ls .rust-stamps/host)"
+        fi
+
+    - name: 编译固件
+      id: compile
+      working-directory: ./openwrt
+      env:
+        # 6h 是 build job 的总时限；从 build job 开始算，5h55m 必须停止编译，
+        # 留 5 分钟给缓存 post 上传。SETUP_MARGIN 用于补偿"job 开始->第一步"的
+        # setup 时间（通常十几秒，这里按 60s 保守估算）。
+        BUILD_JOB_STOP_SECONDS: '21300'
+        CACHE_RESERVE_SECONDS: '300'
+        BUILD_JOB_SETUP_MARGIN_SECONDS: '60'
+        # ccache 默认上限 5GB：内核先编、后面的包会把内核对象 LRU 挤掉，
+        # 导致每次内核都接近冷编（实测 40+ 分钟）。放宽到 10G。
+        CCACHE_MAXSIZE: '10G'
+      run: |
+        start=${BUILD_JOB_START_EPOCH:-$(date +%s)}
+        elapsed=$(( $(date +%s) - start + BUILD_JOB_SETUP_MARGIN_SECONDS ))
+        budget=$(( BUILD_JOB_STOP_SECONDS - elapsed ))
+        echo "build job 已运行约 ${elapsed}s，本次编译预算 ${budget}s（build job 开始后 5h55m 停止编译，留 5min 存缓存）"
+        if [ "$budget" -le 0 ]; then
+          echo "::error ::build job 已运行 ${elapsed}s（超过 5h55m 阈值），直接失败以便保存缓存"
+          exit 1
+        fi
+        set +e
+        # V=1（=V=w）：子 make 以 -s 运行、不回显每条命令（没有 V=s 的降速/海量输出），
+        # stdout 照常丢弃，只保留 stderr；把 stderr 写进 openwrt/compile.log，
+        # 和本地 `make ... 2> compile.log` 一样是一份几十 KB 的报错日志。
+        # CI 日志只有正常进度行（make[N] -C ...）和 time: 行。
+        timeout --signal=TERM --kill-after=60s "$budget" \
+          bash -c 'make -j$(($(nproc)+1)) V=1' \
+          2> >(gawk '{ print strftime("[%H:%M:%S]"), $0; fflush() }' > compile.log)
+        rc=$?
+        sleep 1
+        set -e
+        if [ "$rc" -ne 0 ]; then
+          # artifact 上传不跟随软链（openwrt -> /workdir/openwrt），失败时复制一份
+          # 到工作区根目录供上传。
+          cp -f compile.log "$GITHUB_WORKSPACE/compile.log" || true
+        fi
+        if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+          echo "::error ::编译到达 build job 开始后 5h55m 阈值，主动中断（本次预算 ${budget}s），留 5min 给缓存保存"
+          exit 1
+        fi
+        [ "$rc" -eq 0 ] || exit "$rc"
+        # rust 的 sccache 命中率（没有 rust 构建时输出为 0）
+        sccache --show-stats 2>/dev/null | head -20 || true
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 上传编译日志
+      # 只在失败时上传；compile.log 是编译过程的 stderr（真实报错），通常很小
+      if: failure()
+      continue-on-error: true
+      uses: actions/upload-artifact@main
+      with:
+        name: compile-log-${{ needs.prepare.outputs.machine }}-${{ matrix.target }}
+        path: compile.log
+        if-no-files-found: ignore
+        retention-days: 7
+
+    - name: 检查空间使用情况
+      if: (!cancelled())
+      run: df -hT
+
+    - name: 清理旧缓存（每个 key 前缀只留最新 1 个）
+      # 每次构建都会存一个新的 ccache 快照（key 带时间戳），不清理会占满
+      # GitHub 仓库 10GB 配额（当前 7 个 ccache ≈ 9.6GB），把 tc-* 工具链缓存
+      # 挤掉、也挤掉各机型自己的旧快照。这里删掉同前缀的旧条目，只留最新一个。
+      if: always() && env.Cache == '1'
+      continue-on-error: true
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        gh cache list --limit 100 --json id,key,createdAt \
+          --jq '.[] | [.createdAt, (.id|tostring), .key] | @tsv' \
+          | sort -r \
+          | awk -F'\t' '$3 ~ /-cache-openwrt-[0-9]+$/ {
+              base=$3; sub(/-[0-9]+$/, "", base);
+              if (seen[base]++ >= 1) print $2
+            }' \
+          | while read -r id; do [ -n "$id" ] && gh cache delete "$id" || true; done
+
+    - name: 检查空间使用情况2
+      if: (cancelled())
+      run: df -hT
+
+    - name: 上传bin目录
+      uses: actions/upload-artifact@main
+      continue-on-error: true
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      with:
+        name: ${{ env.date3 }}_${{matrix.target}}_openwrt-25.12-6.18
+        path: |
+          openwrt/bin/
+
+    - name: 打包ipk成zip文件
+      id: afb
+      continue-on-error: true
+      if: steps.compile.outputs.status == 'success' && !cancelled()
+      run: |
+        $GITHUB_WORKSPACE/$DIY_SH_AFB
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 整理文件
+      id: organize
+      if: env.UPLOAD_FIRMWARE == 'true' && steps.afb.outputs.status == 'success' && !cancelled()
+      run: |
+        mkdir firmware ipks
+        cp -u -f openwrt/kernelipks.zip ipks
+        cp -u -f openwrt/ipks.zip ipks
+        [ ${{ env.UPLOAD_RELEASE}} = 1 ] && cp -u -f openwrt/kernelipks.zip firmware
+        [ ${{ env.UPLOAD_RELEASE}} = 1 ] && cp -u -f openwrt/ipks.zip firmware
+        cp openwrt/.config  ./firmware/${{matrix.target}}.config
+        cp openwrt/build_dir/target-*/linux-*/linux-*/.config ./firmware/${{matrix.target}}_kernel.config
+        mv -f openwrt/bin/targets/*/*/{*combined*,*ext4*,*sdk*,*imagebuilder*,*buildinfo*,*manifest*,*json*,*sha256sums*} ./firmware/ 2>/dev/null || true
+        [ $UPLOAD_SYSUPGRADE = true ] && mv -f openwrt/bin/targets/*/*/{*squashfs*,*sysupgrade*} ./firmware/ 2>/dev/null || true
+        cd firmware
+        echo "v${{ env.date2 }}" > version.txt
+        echo ${{matrix.target}} >> version.txt
+        rm -rf sha256sums
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 上传firmware目录
+      uses: actions/upload-artifact@main
+      continue-on-error: true
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true'
+      with:
+        name: ${{ env.date3 }}_${{matrix.target}}_firmware_openwrt-25.12-6.18-${{ needs.prepare.outputs.machine }}-${{ github.event.inputs.SETIP }}${{ env.Kernel_Test }}${{ env.BCM_FULLCONE_NAME }}${{ env.SFE }}${{ env.TRY_BBR_V3_NAME }}${{ env.eBPF }}
+        path: |
+          firmware
+
+    - name: 上传ipk目录
+      uses: actions/upload-artifact@main
+      continue-on-error: true
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_IPK_DIR == 'true' && steps.afb.outputs.status == 'success'
+      with:
+        name: ${{ env.date3 }}_${{matrix.target}}_ipks_openwrt-25.12-6.18-${{ needs.prepare.outputs.machine }}${{ env.Kernel_Test }}${{ env.BCM_FULLCONE_NAME }}${{ env.SFE }}${{ env.TRY_BBR_V3_NAME }}${{ env.eBPF }}
+        path: |
+          ipks
+
+    - name: 上传固件cowtransfer
+      id: cowtransfer
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
+      run: |
+        curl -fsSL git.io/file-transfer | sh
+        ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
+        echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
+        echo "url=$(cat cowtransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
+
+    - name: 上传固件WeTransfer
+      id: wetransfer
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
+      run: |
+        curl -fsSL git.io/file-transfer | sh
+        ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
+        echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
+        echo "url=$(cat wetransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
+
+    - name: 生成发布标签
+      id: tag
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_RELEASE == '1' && !cancelled()
+      run: |
+        touch release.txt
+        $GITHUB_WORKSPACE/gen-sha256sum.sh
+        echo "# 当前固件IP地址："${{ github.event.inputs.SETIP }}" " >> release.txt
+        [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
+        [ $UPLOAD_WETRANSFER = true ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
+        echo "🔗 ${{ env.BCM_FULLCONE_NAME }}${{ env.SFE }}${{ env.TRY_BBR_V3_NAME }}" >> release.txt
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 上传固件发布
+      uses: softprops/action-gh-release@v2
+      if: steps.tag.outputs.status == 'success' && !cancelled()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        files: "${{ env.FIRMWARE }}/*"
+        name: ${{ env.date }} ${{matrix.target}}-${{ needs.prepare.outputs.machine }}-openwrt-25.12-6.18
+        tag_name: ${{ env.date }}_${{matrix.target}}-${{ needs.prepare.outputs.machine }}-openwrt-25.12-6.18
+        body_path: release.txt
+
+    - name: 删除工作流
+      uses: Mattraks/delete-workflow-runs@main
+      continue-on-error: true
+      with:
+        retain_days: 30
+        keep_minimum_runs: 20
+
+    - name: 删除旧版本
+      uses: dev-drprasad/delete-older-releases@master
+      continue-on-error: true
+      if: github.event.inputs.UPLOAD_RELEASE == 'true' && !cancelled()
+      with:
+        keep_latest: 100
+        delete_tags: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -81,6 +81,23 @@ GitHub 托管 runner 的**单个 job** 上限是 6 小时（prepare job 不计�
 
 预算不够时（前面的克隆/feeds/下载耗时过长）会在编译开始前直接失败，同样是为了先保住缓存。
 
+### 合并工作流（工具链 + 固件）
+
+`.github/workflows/build-rockchip-2512-618-combo.yml`：一次 dispatch 完成
+「工具链缓存 + 固件编译」：
+
+- job `toolchain`：先查工具链缓存；`tc_mode=auto`（默认）命中就直接跳过，
+  `tc_mode=rebuild` 才重建。重建时可勾 `panfrost`（llvm/mesa）和 `rust`（ruby/rustc）
+  顺带预热，产物（含 `.sccache` / `.rust-stamps`）存进工具链缓存 + Release；
+- job `build`：matrix 编译固件，直接复用 job 1 保存的缓存（同一个 `tc-...` key），
+  不再需要单独跑一次 Build Toolchain Cache。
+
+说明：
+- 两个 job 在不同 runner 上，job 1 上限 330 分钟、job 2 仍是 5h55m 保护；
+- `tc_mode=auto` 且缓存命中时，job 1 只花 ~1 分钟恢复缓存；
+- 要预热 rust/panfrost 时建议分两次跑（一次 `rust=true`、一次 `panfrost=true`），
+  因为 `make world` 的预热有 4 小时上限，两个一起容易跑不完。
+
 ### 初始化环境（本地化脚本）
 
 `初始化环境` 以前是 `sudo bash -c 'bash <(curl .../init_build_environment.sh)'`。
