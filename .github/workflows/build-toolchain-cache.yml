@@ -56,6 +56,14 @@ on:
         options:
         - 'false'
         - 'true'
+      rust:
+        description: '顺带编译 ruby/rust（ruby 的 YJIT 会拉 rust/host，很慢）'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+        - 'false'
+        - 'true'
 
 env:
   TZ: Asia/Shanghai
@@ -72,6 +80,7 @@ jobs:
       Target_CFG_Machine: ${{ github.event.inputs.machine || 'ztl-joyrock' }}
       SFE_INPUT_STATUS: 'false'
       PANFROST: ${{ github.event.inputs.panfrost || 'false' }}
+      RUST: ${{ github.event.inputs.rust || 'false' }}
 
     steps:
     - name: 检查
@@ -190,26 +199,37 @@ jobs:
         echo -e "$(nproc) thread toolchain compile"
         make -j$(nproc) tools/install toolchain/install
 
-    - name: 预热 libmesa-panfrost（llvm/mesa）
-      # 只保留 target/device + libmesa-panfrost，编出内核依赖链和 llvm/mesa，
-      # 产物进 .ccache；随后缓存步骤会把 .ccache 一起存进工具链缓存，
-      # 固件构建恢复工具链时就能直接命中（llvm/mesa 是 -j1 构建，冷编很慢）。
-      if: env.PANFROST == 'true'
+    - name: 预热 libmesa-panfrost / ruby+rust
+      # 用最小 .config 只编需要预热的东西，产物进 .ccache；随后缓存步骤会把
+      # .ccache 一起存进工具链缓存，固件构建恢复工具链时就能直接命中。
+      #   panfrost=true：libmesa-panfrost → llvm/mesa（-j1 构建，冷编很慢）
+      #   rust=true    ：ruby + RUBY_ENABLE_YJIT=true → rust/host（rustc，约 4h）
+      if: env.PANFROST == 'true' || env.RUST == 'true'
       working-directory: ./openwrt
       env:
         CCACHE_MAXSIZE: 3G
       run: |
         cp .config /tmp/toolchain.full.config
-        grep -E '^CONFIG_TARGET_' /tmp/toolchain.full.config > .config || true
-        cat >> .config <<'EOF'
-        CONFIG_CCACHE=y
-        CONFIG_PACKAGE_libmesa-panfrost=y
-        EOF
+        {
+          grep -E '^CONFIG_TARGET_' /tmp/toolchain.full.config || true
+          echo 'CONFIG_CCACHE=y'
+          if [ "${PANFROST:-false}" = 'true' ]; then
+            echo 'CONFIG_PACKAGE_libmesa-panfrost=y'
+          fi
+          if [ "${RUST:-false}" = 'true' ]; then
+            echo 'CONFIG_PACKAGE_ruby=y'
+            echo 'CONFIG_RUBY_ENABLE_YJIT=y'
+          fi
+        } > .config
         make -s defconfig
-        echo "mesa-only 配置："
-        grep -E 'CONFIG_PACKAGE_(libmesa-panfrost|llvm)=' .config || true
-        # 限时 3.5 小时（job 上限 330 分钟）；超时也保留已经编出来的 ccache
-        timeout 12600 make -j$(nproc) world || true
+        echo "预热配置："
+        grep -E 'CONFIG_PACKAGE_(libmesa-panfrost|ruby)=|CONFIG_RUBY_ENABLE_YJIT|CONFIG_PACKAGE_llvm=' .config || true
+        # 限时：只预热 panfrost 时 3.5h；带 rust 时 4h（rust 单编约 4h，job 上限 330min）
+        warm_timeout=12600
+        if [ "${RUST:-false}" = 'true' ]; then
+          warm_timeout=14400
+        fi
+        timeout "$warm_timeout" make -j$(nproc) world || true
         ccache -s || true
 
     - name: 保存工具链到 Actions 缓存

@@ -124,10 +124,17 @@ stderr，文件通常只有几十 KB。
 
 ### 在工具链缓存里预热 libmesa-panfrost（可选）
 
-`Build Toolchain Cache (Rockchip)` 新增 `panfrost` 选项（默认 `false`）。开启后，在
-`tools + toolchain` 编译完之后，会用一份**最小 `.config`**（只保留 `CONFIG_TARGET_*`
-和 `CONFIG_PACKAGE_libmesa-panfrost`）跑 `make world`（限时 3.5 小时），把内核依赖链、
-llvm、mesa 的编译产物写进 `.ccache`，并随工具链缓存一起保存。
+`Build Toolchain Cache (Rockchip)` 新增 `panfrost` / `rust` 两个选项（默认 `false`）。
+开启后，在 `tools + toolchain` 编译完之后，会用一份**最小 `.config`**（只保留
+`CONFIG_TARGET_*` 加对应包）跑 `make world`，把编译产物写进 `.ccache`，
+并随工具链缓存一起保存：
+
+- `panfrost=true`：`CONFIG_PACKAGE_libmesa-panfrost=y` → 内核依赖链 + llvm/mesa
+  （限时 3.5 小时；llvm/mesa 是 -j1 构建，冷编很慢）；
+- `rust=true`：`CONFIG_PACKAGE_ruby=y` + `CONFIG_RUBY_ENABLE_YJIT=y` →
+  ruby + `rust/host`（限时 4 小时）。
+  注意 rustc 是 Rust 自举编译，**ccache 不适用**，预热主要收益是 ruby 的 C 部分；
+  而且 rust 单编约 4 小时，可能仍撞超时（超时也会保存已编出的 ccache）。
 
 固件构建的「恢复工具链」步骤现在会连 `.ccache` 一起恢复（paths 必须和保存端一致，
 否则 actions/cache 的 cache version 对不上），所以：
