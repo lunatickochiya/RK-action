@@ -176,7 +176,6 @@ jobs:
           -e 's|https://git.openwrt.org/feed/telephony.git;openwrt-25.12|https://github.com/openwrt/telephony.git;openwrt-25.12|' \
           feeds.conf.default
         sed -i '$a src-git lunatic7 https://github.com/lunatickochiya/luna-action-packages.git' feeds.conf.default
-        sed -i '$a src-git node https://github.com/nxhack/openwrt-node-packages.git;openwrt-25.12' feeds.conf.default
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: 增加磁盘空间
@@ -229,11 +228,6 @@ jobs:
         rm -rf feeds/packages.index
         grep -q -- '--ci false \\' feeds/packages/lang/rust/Makefile || sed -i '/x\.py \\/a \        --ci false \\' feeds/packages/lang/rust/Makefile
         ./scripts/feeds update luci packages
-        ./scripts/feeds update node
-        # node feed 与 packages feed 有同名包（node、node-*），
-        # 先删掉 packages feed 里已安装的软链，再用 node feed 覆盖安装
-        rm -rf ./package/feeds/packages/node ./package/feeds/packages/node-*
-        ./scripts/feeds install -a -p node
         ./scripts/feeds install -a
         echo "status=success" >> $GITHUB_OUTPUT
 

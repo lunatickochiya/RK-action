@@ -258,8 +258,12 @@ openwrt-2512-618-rk/           # 6.18 需要套在源码树上的补丁/资源
 - 6.18 的所有机型都已经去掉 `luci-app-quickfile`：它会拉入 `quickfile`（Rust），
   进而触发 `rust/host-compile`，实测单次 **4 小时 20 分**（`time:` 行显示
   `#27506.58#1238.18#15605.60`），是 lite 构建超时的直接原因。需要它的 ipk 时再单独加回。
-- `shimeta_aiot3588a_lite` 另外去掉了 `node`/`node-npm`：node 的 v8 在 4 核 runner 上
-  冷编约 **3 小时**（run 40423207106 里从 03:05 编到 05:51 还没完），lite 不需要它。
+- 三个 workflow 都已经**去掉自定义 node feed**（`nxhack/openwrt-node-packages`），
+  改用 packages feed 自带的 `lang/node`：后者是 host-only、直接下载官方
+  linux-x64 二进制，不编 v8；自定义 feed 的 node 是目标平台 Node.js，
+  v8 在 4 核 runner 上冷编约 **3 小时**（run 40423207106 里从 03:05 编到 05:51 还没完）。
+  `package-configs` 里的 `CONFIG_PACKAGE_node` 保持不变；`node-npm` 在 packages feed
+  里不存在，`make defconfig` 会忽略它。
 
 ### lite 机型与缓存预热
 
