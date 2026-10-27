@@ -110,7 +110,12 @@ function init_openwrt_patch_file_dir_2512_rk() {
 }
 
 function init_pkg_env() {
-	sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+	# 用仓库内的本地副本（scripts/init_build_environment.sh）：
+	# 上游脚本会做 `apt full-upgrade`，在镜像慢的时候能把初始化卡 1~2 小时；
+	# 本地副本去掉了 full-upgrade，其余依赖列表保持一致。
+	local repo_dir
+	repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	sudo bash "$repo_dir/scripts/init_build_environment.sh"
 	sudo -E apt-get -qq install libgnutls28-dev coccinelle libfuse-dev \
 	b43-fwcutter cups-ppdc python3-pip
 	pip3 install pyelftools

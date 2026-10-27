@@ -81,6 +81,22 @@ GitHub 托管 runner 的**单个 job** 上限是 6 小时（prepare job 不计�
 
 预算不够时（前面的克隆/feeds/下载耗时过长）会在编译开始前直接失败，同样是为了先保住缓存。
 
+### 初始化环境（本地化脚本）
+
+`初始化环境` 以前是 `sudo bash -c 'bash <(curl .../init_build_environment.sh)'`。
+上游脚本里有 `apt full-upgrade -y`，会把内核、systemd 等 99 个包一起升级
+（下载 400MB+）。Azure 镜像偶尔只有几十 KB/s，初始化就会卡 1~2 小时。
+
+最近 job 的 `初始化环境` 实测：正常 **4m01s ~ 5m51s**；异常时
+15m54s（run 40423207106）、1h09m~1h15m（run 40328103961）、
+**2h07m**（run 40323551386）。
+
+现在改为仓库内的 `scripts/init_build_environment.sh`（`core.sh init-pkg-env` 调用它）：
+
+- 去掉 `apt full-upgrade`，只装构建依赖（其余列表与上游一致）；
+- 网络探测加超时、apt 加 `Acquire::Retries=3`、非交互（`DEBIAN_FRONTEND`）；
+- 不再依赖 `build-scripts.immortalwrt.org` 的可用性。
+
 ### 编译日志与失败排查
 
 `编译固件` 用 `make ... V=1`（OpenWrt 的 `V=1` 等于 `V=w`：子 make 以 `-s`
