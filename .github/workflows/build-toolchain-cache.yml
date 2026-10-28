@@ -230,7 +230,23 @@ jobs:
         if [ "${RUST:-false}" = 'true' ]; then
           warm_timeout=14400
         fi
+        # 磁盘看门狗：预热（rust/llvm）最容易把 runner 磁盘写满，低了就收手
+        (
+          while true; do
+            avail=$(df --output=avail -BG / 2>/dev/null | tail -n1 | tr -dc '0-9')
+            if [ -n "$avail" ] && [ "$avail" -lt 6 ]; then
+              echo "::error ::磁盘剩余仅 ${avail}G，主动终止预热（保存已编出的缓存）"
+              pkill -TERM -x make 2>/dev/null || true
+              sleep 5
+              pkill -KILL -x make 2>/dev/null || true
+              break
+            fi
+            sleep 60
+          done
+        ) &
+        disk_watchdog=$!
         timeout "$warm_timeout" make -j$(nproc) world || true
+        kill "$disk_watchdog" 2>/dev/null || true
         ccache -s || true
         # 如果本次编了 rust，把它的 stamp 收集到 .rust-stamps（只有几个文件），
         # 固件端恢复后 make 会认为 rust/host 已完成，直接跳过 4h 的 rust 构建。

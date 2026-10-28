@@ -98,6 +98,30 @@ GitHub 托管 runner 的**单个 job** 上限是 6 小时（prepare job 不计�
 - 要预热 rust/panfrost 时建议分两次跑（一次 `rust=true`、一次 `panfrost=true`），
   因为 `make world` 的预热有 4 小时上限，两个一起容易跑不完。
 
+### 磁盘与缓存配额
+
+runner 是 145G 系统盘（build_dir/dl 通过软链放到 /mnt，但仍在同一块盘上）。
+完整版 + ALLKMOD 构建实测会用到 **116~125G**（剩 20~29G），rust/llvm 预热再叠加
+几十 GB，很容易写满。
+
+有两个 job 出现过 **runner 崩溃**（不是构建报错）：
+
+- run 40605716049 的 `122544623108`：编译步骤 00:14 开始后一直没有结论，
+  job 03:33 直接失败，日志 `BlobNotFound`；
+- run 40518483441 的 `122561230132`：同样在编译中失去日志。
+
+典型磁盘写满导致的 runner 崩溃。现在的处理：
+
+- **ccache 上限从 10G 降到 6G**（内核对象仍能留住一部分，但不再吃掉太多磁盘/缓存配额）；
+- **磁盘看门狗**：编译步骤和工具链预热都会每 60s 检查 `/` 剩余空间，
+  低于 **6G** 时主动终止 make 并报 `::error ::磁盘剩余仅 xG`，
+  这样 job 至少能保存 `compile.log` 和 ccache（runner 崩溃时两者都保不住）；
+- **缓存清理**：每次构建结束同一 key 前缀只留最新 1 份，10GB 配额不会被旧快照占满；
+- `释放Ubuntu磁盘空间` 步骤已经会删掉 Azure/Android/Chrome/LLVM 等预装内容（约 40G）。
+
+如果以后还会写满，优先考虑：把 rust/llvm 预热拆到单独 job（已经默认分开）、
+或对完整机型缩减 ALLKMOD 范围。
+
 ### 初始化环境（本地化脚本）
 
 `初始化环境` 以前是 `sudo bash -c 'bash <(curl .../init_build_environment.sh)'`。

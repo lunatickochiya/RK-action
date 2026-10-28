@@ -274,7 +274,23 @@ jobs:
         if [ "${RUST:-false}" = 'true' ]; then
           warm_timeout=14400
         fi
+        # 磁盘看门狗：预热（rust/llvm）最容易把 runner 磁盘写满，低了就收手
+        (
+          while true; do
+            avail=$(df --output=avail -BG / 2>/dev/null | tail -n1 | tr -dc '0-9')
+            if [ -n "$avail" ] && [ "$avail" -lt 6 ]; then
+              echo "::error ::磁盘剩余仅 ${avail}G，主动终止预热（保存已编出的缓存）"
+              pkill -TERM -x make 2>/dev/null || true
+              sleep 5
+              pkill -KILL -x make 2>/dev/null || true
+              break
+            fi
+            sleep 60
+          done
+        ) &
+        disk_watchdog=$!
         timeout "$warm_timeout" make -j$(nproc) world || true
+        kill "$disk_watchdog" 2>/dev/null || true
         ccache -s || true
         # 如果本次编了 rust，把它的 stamp 收集到 .rust-stamps（只有几个文件），
         # 固件端恢复后 make 会认为 rust/host 已完成，直接跳过 4h 的 rust 构建。
@@ -649,9 +665,9 @@ jobs:
         BUILD_JOB_STOP_SECONDS: '21300'
         CACHE_RESERVE_SECONDS: '300'
         BUILD_JOB_SETUP_MARGIN_SECONDS: '60'
-        # ccache 默认上限 5GB：内核先编、后面的包会把内核对象 LRU 挤掉，
-        # 导致每次内核都接近冷编（实测 40+ 分钟）。放宽到 10G。
-        CCACHE_MAXSIZE: '10G'
+        # ccache 上限 6G：太小内核对象会被后续包挤出（内核冷编 40+ 分钟），
+        # 太大又会把 runner 145G 磁盘和 10G 缓存配额吃满（曾出现 runner 直接崩溃）。
+        CCACHE_MAXSIZE: '6G'
       run: |
         start=${BUILD_JOB_START_EPOCH:-$(date +%s)}
         elapsed=$(( $(date +%s) - start + BUILD_JOB_SETUP_MARGIN_SECONDS ))
@@ -662,6 +678,23 @@ jobs:
           exit 1
         fi
         set +e
+        # 磁盘看门狗：剩余低于 6G 时主动终止编译。runner 磁盘被写满会直接崩，
+        # 崩溃的 job 连日志/缓存都保不住（之前有 job 的 compile 步骤没有结论、
+        # 日志 BlobNotFound）。主动失败至少能保存 compile.log 和 ccache。
+        (
+          while true; do
+            avail=$(df --output=avail -BG / 2>/dev/null | tail -n1 | tr -dc '0-9')
+            if [ -n "$avail" ] && [ "$avail" -lt 6 ]; then
+              echo "::error ::磁盘剩余仅 ${avail}G，主动终止编译（保存日志/缓存）"
+              pkill -TERM -x make 2>/dev/null || true
+              sleep 5
+              pkill -KILL -x make 2>/dev/null || true
+              break
+            fi
+            sleep 60
+          done
+        ) &
+        disk_watchdog=$!
         # V=1（=V=w）：子 make 以 -s 运行、不回显每条命令（没有 V=s 的降速/海量输出），
         # stdout 照常丢弃，只保留 stderr；把 stderr 写进 openwrt/compile.log，
         # 和本地 `make ... 2> compile.log` 一样是一份几十 KB 的报错日志。
@@ -670,6 +703,7 @@ jobs:
           bash -c 'make -j$(($(nproc)+1)) V=1' \
           2> >(gawk '{ print strftime("[%H:%M:%S]"), $0; fflush() }' > compile.log)
         rc=$?
+        kill "$disk_watchdog" 2>/dev/null || true
         sleep 1
         set -e
         if [ "$rc" -ne 0 ]; then
