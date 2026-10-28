@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-modechange
 PKG_VERSION:=3.0
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 PKG_LICENSE:=GPL-3.0
 PKG_MAINTAINER:=LunaticUrey <lunaticurey@gmail.com>
 
@@ -32,7 +32,7 @@ define Package/$(PKG_NAME)/postinst
 #!/bin/sh
 [ -n "$$IPKG_INSTROOT" ] || {
 	/etc/init.d/rpcd reload 2>/dev/null
-	rm -f /etc/modechange
+	rm -f /etc/modechange /usr/sbin/modechange
 	rm -rf /tmp/luci*
 	rm -f /tmp/modechange.pending /tmp/modechange.err /tmp/modechange.log
 }
@@ -51,7 +51,7 @@ endef
 
 define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/usr/sbin
-	$(INSTALL_BIN) ./files/usr/sbin/modechange $(1)/usr/sbin/modechange
+	$(INSTALL_BIN) ./files/usr/sbin/network-port-modechange $(1)/usr/sbin/network-port-modechange
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_DATA) ./files/modechange $(1)/etc/config/modechange
 	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller

@@ -3,7 +3,7 @@
 --
 -- 网口模式切换：把物理网口在 LAN / WAN 之间切换。
 -- 旧版本依赖 bash 和 ifname，在 OpenWrt 21.02+ 上已经不能工作；
--- 现在由 /usr/sbin/modechange 直接操作 br-lan 的 device ports。
+-- 现在由 /usr/sbin/network-port-modechange 直接操作 br-lan 的 device ports。
 
 local fs = require "nixio.fs"
 local sys = require "luci.sys"
@@ -24,7 +24,7 @@ local role_names = {
 
 local function read_ports()
 	local ports = {}
-	local out = sys.exec("/usr/sbin/modechange list 2>/dev/null") or ""
+	local out = sys.exec("/usr/sbin/network-port-modechange list 2>/dev/null") or ""
 	for line in out:gmatch("[^\r\n]+") do
 		local name, role = line:match("^(%S+)%s+(%S+)")
 		if name then
@@ -43,7 +43,7 @@ local function switch_port(port, role)
 	end
 
 	local rc = sys.call(string.format(
-		"/usr/sbin/modechange %s %s >/tmp/modechange.log 2>&1", role, port))
+		"/usr/sbin/network-port-modechange %s %s >/tmp/modechange.log 2>&1", role, port))
 
 	if rc == 0 then
 		os.remove("/tmp/modechange.err")
@@ -70,7 +70,7 @@ st = s:option(DummyValue, "_status", translate("当前配置"))
 st.rawhtml = true
 st.cfgvalue = function(self, section)
 	local html = '<pre style="white-space:pre-wrap;margin:0">' ..
-		xml.pcdata(sys.exec("/usr/sbin/modechange status 2>&1") or "") .. '</pre>'
+		xml.pcdata(sys.exec("/usr/sbin/network-port-modechange status 2>&1") or "") .. '</pre>'
 
 	local err = fs.readfile("/tmp/modechange.err")
 	if err and #err > 0 then

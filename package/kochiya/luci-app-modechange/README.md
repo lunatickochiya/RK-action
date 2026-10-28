@@ -19,20 +19,21 @@ LuCI：**服务 → 网口模式切换**。页面会列出所有物理网口及�
 “设为 LAN 口 / 设为 WAN 口”两个按钮。切换后会自动重启网络和防火墙；如果你正通过
 该网口访问 LuCI，连接会短暂中断。
 
-命令行（脚本安装为 `/usr/sbin/modechange`，已在 PATH 中）：
+命令行（脚本安装为 `/usr/sbin/network-port-modechange`，已在 PATH 中）：
 
 ```sh
-modechange list          # 网口和角色
-modechange status        # 当前 LAN/WAN 配置
-modechange lan eth0      # 把 eth0 设为 LAN
-modechange wan eth0      # 把 eth0 设为 WAN
-modechange apply         # 2 秒后重启网络和防火墙
+network-port-modechange list          # 网口和角色
+network-port-modechange status        # 当前 LAN/WAN 配置
+network-port-modechange lan eth0      # 把 eth0 设为 LAN
+network-port-modechange wan eth0      # 把 eth0 设为 WAN
+network-port-modechange apply         # 2 秒后重启网络和防火墙
 ```
 
 ## 注意
 
 - 只操作 `/etc/config/network`，不会修改防火墙区域、DHCP 或无线配置。
-- 升级后旧的 `/etc/modechange` 会被清理，实际脚本位于 `/usr/sbin/modechange`。
+- 升级后旧的 `/etc/modechange`、`/usr/sbin/modechange` 会被清理，实际脚本位于
+  `/usr/sbin/network-port-modechange`。
 - 如果 WAN 口需要 PPPoE/静态地址，请在“网络 → 接口”里修改；切换模式不会覆盖已有配置。
 - 支持 OpenWrt 21.02+ 的 netifd `device` 语法；本仓库的 Rockchip 板是 GMAC
   直连网口，不涉及 swconfig VLAN。

@@ -1,14 +1,14 @@
 #!/bin/sh
 #=================================================
-# modechange - 在 LAN 和 WAN 之间切换物理网口
+# network-port-modechange - 在 LAN 和 WAN 之间切换物理网口
 #
 # 用法:
-#   modechange list             列出物理网口及其角色
-#   modechange status           显示当前 LAN/WAN 配置
-#   modechange lan [网口]       把网口设为 LAN（默认: 当前 WAN 口）
-#   modechange wan [网口]       把网口设为 WAN（默认: 当前 LAN 口）
-#   modechange apply            2 秒后重启网络和防火墙
-#   modechange restart          立即重启网络和防火墙
+#   network-port-modechange list             列出物理网口及其角色
+#   network-port-modechange status           显示当前 LAN/WAN 配置
+#   network-port-modechange lan [网口]       把网口设为 LAN（默认: 当前 WAN 口）
+#   network-port-modechange wan [网口]       把网口设为 WAN（默认: 当前 LAN 口）
+#   network-port-modechange apply            2 秒后重启网络和防火墙
+#   network-port-modechange restart          立即重启网络和防火墙
 #
 # 只修改 /etc/config/network 中网口的归属。切换为 LAN 时保留 WAN
 # 接口配置并设置 auto=0，切回 WAN 时直接恢复，不会丢失 PPPoE 等设置。
