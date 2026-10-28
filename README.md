@@ -207,13 +207,13 @@ make[3]: *** [.../kmod-b43-...apk] Error 127
 | MACH | 设备 | 说明 |
 |---|---|---|
 | `ztl-joyrock` | ZTL Joyrock RK3399 GB V1.1 | 2GB LPDDR4 / eMMC / AP6212A，含 RKMPP 硬解 |
-| `ztl-lite` | 同上（`ztl-joyrock` 设备） | **精简包配置**：去掉代理/下载/媒体/文件共享/监控等重包 |
+| `ztl-lite` | 同上（`ztl-joyrock` 设备） | **精简包配置**：NAS 存储/共享 + 容器 + VPN，去掉代理/下载/媒体/监控等重包 |
 | `tpm312` | Wesine TPM312 | RK3399（仅 6.6 画像；6.18 源码分支暂无该板支持） |
 | `mpc1917` | Rocktech MPC1917 | RK3399 |
-| `mpc1917_lite` | 同上（`mpc1917` 设备） | 精简包配置 |
+| `mpc1917_lite` | 同上（`mpc1917` 设备） | **精简包配置**：NAS 存储/共享 + 容器 |
 | `fmx1_pro` | ChipTrip FMX1 Pro | RK3399 |
 | `shimeta_aiot3588a` | ShiMeta AIOT-3588A | RK3588（VPU/NPU/MPP） |
-| `shimeta_aiot3588a_lite` | 同上（`shimeta_aiot3588a` 设备） | **精简包配置**：去掉代理/下载/媒体/文件管理/监控/多主题/panfrost 等重包 |
+| `shimeta_aiot3588a_lite` | 同上（`shimeta_aiot3588a` 设备） | **精简包配置**：NAS 存储/共享 + IPTV + 容器/打印，去掉代理/下载/媒体/多主题/panfrost 等重包 |
 
 `*_lite` 机型与全量机型的设备（machine-config）完全相同，区别只在 `package-configs` 里的软件包集合。
 
@@ -221,6 +221,36 @@ make[3]: *** [.../kmod-b43-...apk] Error 127
 > `ztl-joyrock` / `ztl-lite` / `mpc1917` / `mpc1917_lite` / `fmx1_pro` / `shimeta_aiot3588a` / `shimeta_aiot3588a_lite`。
 > 该分支目前没有 `wesine-tpm312` 的 DTS/U-Boot 目标，因此 6.18 的 machine/package 配置里
 > 不包含 `tpm312`；等源码分支补齐后再加回即可。
+
+## 软件包配置结构
+
+`package-configs/<patch_dir>/` 下每个机型按防火墙后端各一份：`<机型>-rockchip-iptables.config`、
+`<机型>-rockchip-nftables.config`。所有配置统一按下面的顺序分区，方便机型之间对照和合并：
+
+```
+基础参数 -> 机型/设备 -> 网络基础/防火墙 -> 代理 -> VPN/隧道 -> 内网穿透 -> IPTV/组播
+-> 下载/网盘/媒体 -> 存储/文件共享（NAS） -> 容器/Docker -> 打印/外设 -> 主题/界面
+-> 监控/系统 -> 网络服务 -> 工具 -> 视频/硬件加速 -> 构建选项 -> 其他
+```
+
+机型差异只在同一分区内的条目上，不再需要逐行比对整份文件。
+
+### 完整版与 lite 的差异
+
+- **完整版**（`shimeta_aiot3588a` / `ztl-joyrock` / `fmx1_pro` / `mpc1917` / `tpm312`）：
+  保留代理、下载/网盘、远程访问等全部功能。统一去掉 `luci-app-ssr-plus`（连带 `ruby`/`ruby-yaml`，
+  否则会触发 4h+ 的 rust host 构建）、`libmesa-panfrost`（mesa+LLVM，NAS/IPTV 用不到）、
+  `umdns`、`luci-proto-qmi`、`luci-theme-alpha`；保留 argon + aurora、tailscale、
+  zerotier、sakurafrp。
+- **lite**（`shimeta_aiot3588a_lite` / `ztl-lite` / `mpc1917_lite`）：
+  去掉代理/下载/媒体/监控/多主题/panfrost 等重包，但补齐 NAS 所需的存储栈：
+  `smartmontools`/`smartd`、`nfs-kernel-server-v4`、`mdadm` + `kmod-md-raid456`、
+  `btrfs-progs`、`exfat-mkfs`/`exfat-fsck`、`xfs-mkfs`/`xfs-fsck`/`xfs-growfs`、
+  `e2fsprogs`/`tune2fs`/`resize2fs`、`dosfstools`、`parted`、`hdparm`、`nvme-cli`、
+  `kmod-nvme`、`kmod-usb3`、`luci-app-diskman`、`luci-app-hd-idle`，以及 **ksmbd**
+  内核态 SMB（`ksmbd-server` + `luci-app-ksmbd` + `wsdd2`）。
+- shimeta 系列额外带 IPTV：`igmpproxy` + `luci-app-rtp2httpd` + `luci-app-udpxy`
+  （完整版另有 `luci-app-msd_lite`）。
 
 ## 参数说明
 
