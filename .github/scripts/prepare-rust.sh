@@ -53,7 +53,10 @@ if ! command -v rustup >/dev/null 2>&1; then
 	fi
 fi
 
-HOST_TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
+HOST_TRIPLE=$(rustc -vV 2>/dev/null | sed -n 's/^host: //p' || true)
+if [ -z "$HOST_TRIPLE" ]; then
+	HOST_TRIPLE=$(rustup show 2>/dev/null | sed -n 's/^Default host: //p' | head -n1 || true)
+fi
 if [ -z "$HOST_TRIPLE" ]; then
 	echo "::warning ::cannot determine Rust host triple, skip rust injection"
 	exit 0
