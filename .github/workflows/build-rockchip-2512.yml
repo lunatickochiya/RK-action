@@ -274,6 +274,25 @@ jobs:
         echo "------------------------"
         awk '/turboacc/ { print }' .config
 
+    - name: 准备宿主工具链（Rust/Go/LLVM/Python）
+      if: steps.config.outputs.status == 'success'
+      working-directory: ./openwrt
+      run: |
+        # rust：用 runner 的 rustup 替换 rust/host 源码构建（4h -> 1min）
+        bash "$GITHUB_WORKSPACE/.github/scripts/prepare-rust.sh" || \
+          echo "::warning ::Rust 注入失败，回退到源码构建"
+        # Go / eBPF LLVM / host Python PGO：能用 runner 的就不从源码编
+        bash "$GITHUB_WORKSPACE/.github/scripts/prepare-build-host.sh" || \
+          echo "::warning ::宿主工具链准备失败，保持 OpenWrt 默认行为"
+
+    - name: 注入编译耗时统计
+      if: steps.config.outputs.status == 'success'
+      working-directory: ./openwrt
+      run: |
+        python3 "$GITHUB_WORKSPACE/.github/scripts/patch-build-time-log.py" . \
+          --scripts-dir "$GITHUB_WORKSPACE/.github/scripts" || \
+          echo "::warning ::编译耗时统计注入失败，跳过报告"
+
     - name: 下载包文件
       if: steps.config.outputs.status == 'success'
       run: |
@@ -290,17 +309,11 @@ jobs:
       if: env.Cache == '1' && !cancelled()
       uses: lunatickochiya/cachewrtbuild@save-on-failure
       with:
-        # ccache/.sccache/.rust-stamps 一起恢复：工具链缓存里可能带
-        # build-toolchain-cache.yml 预热好的 llvm/mesa、rust 对象和 rust 编译戳；
-        # paths 必须和保存端完全一致
-        # （staging_dir/host*, staging_dir/tool*, .sccache, .rust-stamps, .ccache），
-        # actions/cache 的 version 才匹配。
+        # 工具链缓存只含 staging_dir/host*、staging_dir/tool* 和 .ccache。
+        # rust 不再预热（固件端用 runner rustup 注入），所以不再带 .rust-stamps。
         ccache: 'true'
         toolchain: 'true'
         skip: 'true'
-        extra_paths: |
-          .sccache
-          .rust-stamps
         mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
         skip_saving: 'true'
@@ -364,22 +377,20 @@ jobs:
           echo "已补齐 b43-fwsquash.py"
         fi
 
-    - name: 恢复 rust 预编译戳（跳过 rust 重编）
-      # 工具链缓存里的 .rust-stamps 只包含 .prepared*/.configured/.built 几个文件。
-      # 复制到 build_dir 后，make 会认为 rust/host 已经编译完成（staging 里的
-      # .rust_installed 也在工具链缓存中），直接跳过 4h 的 rust 构建。
-      # 如果 rust 包内容变了（stamp 名里的 md5 变化），会自动回退到正常编译。
+    - name: 修正工具链缓存时间戳
+      # actions/cache 解压后 mtime 可能早于源码，make 会把 host/tool stamp 判为过期，
+      # 白重编一遍工具链。touch 一下 stamp，再补 tmp/.build（所有 stamp 的公共依赖）。
       if: (!cancelled())
       working-directory: ./openwrt
       run: |
-        if [ -d .rust-stamps/host ]; then
-          for t in build_dir/target-*/; do
-            [ -d "$t" ] || continue
-            mkdir -p "$t/host"
-            cp -a .rust-stamps/host/. "$t/host/"
-          done
-          echo "已恢复 rust 编译戳: $(ls .rust-stamps/host)"
+        if [ -d staging_dir ]; then
+          find staging_dir -type d -name stamp -not -path "*target*" -print0 2>/dev/null |
+            while IFS= read -r -d '' d; do
+              find "$d" -type f -exec touch {} + 2>/dev/null || true
+            done
         fi
+        mkdir -p tmp
+        echo 1 > tmp/.build
 
     - name: 编译固件
       id: compile
@@ -391,6 +402,8 @@ jobs:
         BUILD_JOB_STOP_SECONDS: '21300'
         CACHE_RESERVE_SECONDS: '300'
         BUILD_JOB_SETUP_MARGIN_SECONDS: '60'
+        # 每个包的 prepare/configure/compile/install 起止时间，编译后汇总 Top 30
+        BUILD_TIME_LOG: 'build-time.tsv'
         # ccache 上限 6G：太小内核对象会被后续包挤出（内核冷编 40+ 分钟），
         # 太大又会把 runner 145G 磁盘和 10G 缓存配额吃满（曾出现 runner 直接崩溃）。
         CCACHE_MAXSIZE: '6G'
@@ -445,6 +458,31 @@ jobs:
         # rust 的 sccache 命中率（没有 rust 构建时输出为 0）
         sccache --show-stats 2>/dev/null | head -20 || true
         echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 生成编译耗时报告
+      # 失败也生成，便于判断是哪个包/阶段拖慢或卡住
+      if: always()
+      continue-on-error: true
+      working-directory: ./openwrt
+      run: |
+        if [ -s build-time.tsv ]; then
+          scripts/build-time-report.pl -n 30 build-time.tsv > build-time-report.txt 2>&1 || true
+          cp -f build-time-report.txt "$GITHUB_WORKSPACE/build-time-report.txt" || true
+          echo "===== 编译耗时 Top 30 ====="
+          cat build-time-report.txt || true
+        else
+          echo "::notice ::没有 build-time.tsv，跳过耗时报告"
+        fi
+
+    - name: 上传编译耗时报告
+      if: always()
+      continue-on-error: true
+      uses: actions/upload-artifact@main
+      with:
+        name: build-time-${{ needs.prepare.outputs.machine }}-${{ matrix.target }}
+        path: build-time-report.txt
+        if-no-files-found: ignore
+        retention-days: 7
 
     - name: 上传编译日志
       # 只在失败时上传；compile.log 是编译过程的 stderr（真实报错），通常很小

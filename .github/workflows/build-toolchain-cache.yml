@@ -56,14 +56,6 @@ on:
         options:
         - 'false'
         - 'true'
-      rust:
-        description: '顺带编译 ruby/rust（ruby 的 YJIT 会拉 rust/host，很慢）'
-        required: true
-        default: 'false'
-        type: choice
-        options:
-        - 'false'
-        - 'true'
 
 env:
   TZ: Asia/Shanghai
@@ -80,7 +72,6 @@ jobs:
       Target_CFG_Machine: ${{ github.event.inputs.machine || 'ztl-joyrock' }}
       SFE_INPUT_STATUS: 'false'
       PANFROST: ${{ github.event.inputs.panfrost || 'false' }}
-      RUST: ${{ github.event.inputs.rust || 'false' }}
 
     steps:
     - name: 检查
@@ -178,7 +169,6 @@ jobs:
         rm -rf feeds/luci.index
         (rm -rf feeds/packages/lang/golang && cp -r $GITHUB_WORKSPACE/$OpenWrt_PATCH_FILE_DIR/feeds-packages-replace/* feeds/packages/ && echo "Golang Replaced")
         rm -rf feeds/packages.index
-        grep -q -- '--ci false \\' feeds/packages/lang/rust/Makefile || sed -i '/x\.py \\/a \        --ci false \\' feeds/packages/lang/rust/Makefile
         ./scripts/feeds update luci packages
         ./scripts/feeds install -a
         echo "status=success" >> $GITHUB_OUTPUT
@@ -199,12 +189,11 @@ jobs:
         echo -e "$(nproc) thread toolchain compile"
         make -j$(nproc) tools/install toolchain/install
 
-    - name: 预热 libmesa-panfrost / ruby+rust
-      # 用最小 .config 只编需要预热的东西，产物进 .ccache；随后缓存步骤会把
-      # .ccache 一起存进工具链缓存，固件构建恢复工具链时就能直接命中。
-      #   panfrost=true：libmesa-panfrost → llvm/mesa（-j1 构建，冷编很慢）
-      #   rust=true    ：ruby + RUBY_ENABLE_YJIT=true → rust/host（rustc，约 4h）
-      if: env.PANFROST == 'true' || env.RUST == 'true'
+    - name: 预热 libmesa-panfrost
+      # 用最小 .config 只编 libmesa-panfrost（llvm/mesa），产物进 .ccache；
+      # 随后缓存步骤会把 .ccache 一起存进工具链缓存，固件构建恢复工具链时就能命中。
+      # rust 不再预热：固件构建端用 runner 的 rustup 直接替换 rust/host。
+      if: env.PANFROST == 'true'
       working-directory: ./openwrt
       env:
         CCACHE_MAXSIZE: 3G
@@ -216,21 +205,13 @@ jobs:
           if [ "${PANFROST:-false}" = 'true' ]; then
             echo 'CONFIG_PACKAGE_libmesa-panfrost=y'
           fi
-          if [ "${RUST:-false}" = 'true' ]; then
-            echo 'CONFIG_PACKAGE_ruby=y'
-            echo 'CONFIG_RUBY_ENABLE_YJIT=y'
-            echo 'CONFIG_RUST_SCCACHE=y'
-          fi
         } > .config
         make -s defconfig
         echo "预热配置："
-        grep -E 'CONFIG_PACKAGE_(libmesa-panfrost|ruby)=|CONFIG_RUBY_ENABLE_YJIT|CONFIG_PACKAGE_llvm=' .config || true
-        # 限时：只预热 panfrost 时 3.5h；带 rust 时 4h（rust 单编约 4h，job 上限 330min）
+        grep -E 'CONFIG_PACKAGE_(libmesa-panfrost|llvm)=' .config || true
+        # 限时 3.5h（job 上限 330min）
         warm_timeout=12600
-        if [ "${RUST:-false}" = 'true' ]; then
-          warm_timeout=14400
-        fi
-        # 磁盘看门狗：预热（rust/llvm）最容易把 runner 磁盘写满，低了就收手
+        # 磁盘看门狗：预热（llvm/mesa）最容易把 runner 磁盘写满，低了就收手
         (
           while true; do
             avail=$(df --output=avail -BG / 2>/dev/null | tail -n1 | tr -dc '0-9')
@@ -248,15 +229,6 @@ jobs:
         timeout "$warm_timeout" make -j$(nproc) world || true
         kill "$disk_watchdog" 2>/dev/null || true
         ccache -s || true
-        # 如果本次编了 rust，把它的 stamp 收集到 .rust-stamps（只有几个文件），
-        # 固件端恢复后 make 会认为 rust/host 已完成，直接跳过 4h 的 rust 构建。
-        rust_build=$(ls -d build_dir/target-*/host/rustc-*-src 2>/dev/null | head -n1 || true)
-        if [ -n "$rust_build" ] && [ -f "$rust_build/.built" ]; then
-          mkdir -p ".rust-stamps/host/$(basename "$rust_build")"
-          cp -a "$rust_build"/.prepared* "$rust_build"/.configured "$rust_build"/.built \
-            ".rust-stamps/host/$(basename "$rust_build")/"
-          echo "已收集 rust stamps: $(basename "$rust_build")"
-        fi
 
     - name: 保存工具链到 Actions 缓存
       uses: lunatickochiya/cachewrtbuild@save-on-failure
@@ -264,12 +236,7 @@ jobs:
         ccache: 'true'
         toolchain: 'true'
         skip: 'true'
-        # rust 预热时把 sccache 和 rust 的编译 stamp 一起存进工具链缓存：
-        #   .sccache     —— rustc crate 缓存
-        #   .rust-stamps —— 只有几个 stamp，固件端恢复后 make 直接跳过 rust 构建
-        extra_paths: |
-          .sccache
-          .rust-stamps
+        # rust 改由固件构建端用 runner rustup 注入，工具链缓存不再保存 rust 相关路径
         mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
 

@@ -87,21 +87,21 @@ GitHub 托管 runner 的**单个 job** 上限是 6 小时（prepare job 不计�
 「工具链缓存 + 固件编译」：
 
 - job `toolchain`：先查工具链缓存；`tc_mode=auto`（默认）命中就直接跳过，
-  `tc_mode=rebuild` 才重建。重建时可勾 `panfrost`（llvm/mesa）和 `rust`（ruby/rustc）
-  顺带预热，产物（含 `.sccache` / `.rust-stamps`）存进工具链缓存 + Release；
+  `tc_mode=rebuild` 才重建。重建时可勾 `panfrost`（llvm/mesa）顺带预热，
+  产物（`staging_dir/host*`、`tool*`、`.ccache`）存进工具链缓存 + Release；
+  rust 不再预热，固件构建端用 runner 的 rustup 直接替换 `rust/host`；
 - job `build`：matrix 编译固件，直接复用 job 1 保存的缓存（同一个 `tc-...` key），
   不再需要单独跑一次 Build Toolchain Cache。
 
 说明：
 - 两个 job 在不同 runner 上，job 1 上限 330 分钟、job 2 仍是 5h55m 保护；
 - `tc_mode=auto` 且缓存命中时，job 1 只花 ~1 分钟恢复缓存；
-- 要预热 rust/panfrost 时建议分两次跑（一次 `rust=true`、一次 `panfrost=true`），
-  因为 `make world` 的预热有 4 小时上限，两个一起容易跑不完。
+- 预热只剩 `panfrost` 一个选项（3.5 小时上限）；rust 由 runner 注入，不再占用预热时间。
 
 ### 磁盘与缓存配额
 
 runner 是 145G 系统盘（build_dir/dl 通过软链放到 /mnt，但仍在同一块盘上）。
-完整版 + ALLKMOD 构建实测会用到 **116~125G**（剩 20~29G），rust/llvm 预热再叠加
+完整版 + ALLKMOD 构建实测会用到 **116~125G**（剩 20~29G），llvm/mesa 预热再叠加
 几十 GB，很容易写满。
 
 有两个 job 出现过 **runner 崩溃**（不是构建报错）：
@@ -119,7 +119,7 @@ runner 是 145G 系统盘（build_dir/dl 通过软链放到 /mnt，但仍在同�
 - **缓存清理**：每次构建结束同一 key 前缀只留最新 1 份，10GB 配额不会被旧快照占满；
 - `释放Ubuntu磁盘空间` 步骤已经会删掉 Azure/Android/Chrome/LLVM 等预装内容（约 40G）。
 
-如果以后还会写满，优先考虑：把 rust/llvm 预热拆到单独 job（已经默认分开）、
+如果以后还会写满，优先考虑：把 llvm/mesa 预热拆到单独 job（已经默认分开）、
 或对完整机型缩减 ALLKMOD 范围。
 
 ### 初始化环境（本地化脚本）
@@ -165,17 +165,11 @@ stderr，文件通常只有几十 KB。
 
 ### 在工具链缓存里预热 libmesa-panfrost（可选）
 
-`Build Toolchain Cache (Rockchip)` 新增 `panfrost` / `rust` 两个选项（默认 `false`）。
+`Build Toolchain Cache (Rockchip)` 有一个 `panfrost` 选项（默认 `false`）。
 开启后，在 `tools + toolchain` 编译完之后，会用一份**最小 `.config`**（只保留
-`CONFIG_TARGET_*` 加对应包）跑 `make world`，把编译产物写进 `.ccache`，
-并随工具链缓存一起保存：
-
-- `panfrost=true`：`CONFIG_PACKAGE_libmesa-panfrost=y` → 内核依赖链 + llvm/mesa
-  （限时 3.5 小时；llvm/mesa 是 -j1 构建，冷编很慢）；
-- `rust=true`：`CONFIG_PACKAGE_ruby=y` + `CONFIG_RUBY_ENABLE_YJIT=y` →
-  ruby + `rust/host`（限时 4 小时）。
-  注意 rustc 是 Rust 自举编译，**ccache 不适用**，预热主要收益是 ruby 的 C 部分；
-  而且 rust 单编约 4 小时，可能仍撞超时（超时也会保存已编出的 ccache）。
+`CONFIG_TARGET_*` 加 `CONFIG_PACKAGE_libmesa-panfrost=y`）跑 `make world`，
+把编译产物写进 `.ccache`，并随工具链缓存一起保存（限时 3.5 小时；
+llvm/mesa 是 -j1 构建，冷编很慢）。
 
 固件构建的「恢复工具链」步骤现在会连 `.ccache` 一起恢复（paths 必须和保存端一致，
 否则 actions/cache 的 cache version 对不上），所以：
@@ -390,36 +384,42 @@ openwrt-2512-618-rk/           # 6.18 需要套在源码树上的补丁/资源
   腾出约 5~6GB），保证 `tc-*` 工具链缓存能长期存在。
 
 注意：`Build Toolchain Cache` 的 `panfrost=true` 只预热 **mesa/llvm**（用最小
-`.config`，不含 ruby/rust），而且它自身有 3.5 小时上限——上次 15:33→19:03 正好
-跑满超时，只缓存了部分 llvm/mesa。rust 是完全独立的一棵树（rustc 编译，ccache
-不适用），所以只能靠关掉 `RUBY_ENABLE_YJIT` 来避免。
+`.config`），而且它自身有 3.5 小时上限——上次 15:33→19:03 正好跑满超时，
+只缓存了部分 llvm/mesa。
 
-### rust 编译提速
+### rust 编译提速（runner 注入）
 
-`rust/host`（rustc 自举 + LLVM）在 4 核 runner 上实测 **4h20m**（user 27506s），
-4 个可选方案，按收益从高到低：
+`rust/host`（rustc 自举 + LLVM）在 4 核 runner 上实测 **4h20m**，ccache 不适用。
+现在不再预热、也不再依赖 `.rust-stamps`：
 
-1. **彻底不用 rust**：关掉 `CONFIG_RUBY_ENABLE_YJIT`（ruby 的 YJIT 在 aarch64
-   默认开启，是 `rust/host` 的唯一触发点）。ruby/ssr-plus 照常编，只是少了 JIT。
-2. **单独预热 rust**：用 `build-toolchain-cache.yml` 的 `rust=true`。
-   预热的最小配置会带上 `CONFIG_RUST_SCCACHE=y`，rust 独占 4 核编译（比在固件
-   构建里和 4 个包抢 jobserver 快得多，后者只有 ~1.8 核）；
-   预热产生的 `.sccache` 会和 `.ccache` 一起存进 **工具链缓存**，
-   固件端恢复工具链时（paths 含 `.sccache`）直接命中，rustc 各 crate 不再重编。
-3. **sccache（已启用）**：配置里 `CONFIG_RUST_SCCACHE=y`（OpenWrt 自带），
-   rustc 走 `RUSTC_WRAPPER=sccache`，缓存目录 `openwrt/.sccache`；
-   workflow 已把 `.sccache` 和 `.ccache` 一起存取，并在编译结束时打印
-   `sccache --show-stats`。
-   - 局限：rust 构建里的 LLVM 是 C++（不走 sccache），第一次仍要全编；
-     跨 run 命中后主要省 rustc 各 crate 的编译。
-4. **缓存 rust 编译戳（已实现，等价于“缓存 build dir”的轻量版）**：
-   `build-toolchain-cache.yml` 的 `rust=true` 预热完成后，把
-   `build_dir/target-*/host/rustc-*-src` 里的 `.prepared*/.configured/.built`
-   收集到 `.rust-stamps`（只有几个文件），随工具链缓存保存；
-   固件端恢复工具链后由“恢复 rust 预编译戳”步骤把 stamp 复制回 build_dir，
-   再配合缓存里 `staging_dir/host/stamp/.rust_installed` 和已安装的 rustc，
-   make 会直接跳过 rust 构建（0 秒）。
-   stamp 文件名带 rust 包内容的 md5，包一变就自动回退到正常编译，不会用错缓存。
+- `prepare-rust.sh` 读取 `feeds/packages/lang/rust/Makefile` 的 `PKG_VERSION`
+  （当前 1.96.0），用 runner 的 rustup 安装**同版本** toolchain，并
+  `rustup target add aarch64-unknown-linux-musl`；
+- `rust-prebuilt.mk` 把 `Host/Prepare`、`Host/Configure` 置空，`Host/Compile`
+  只打印版本，`Host/Install` 把 runner 的 `cargo`/`rustc`/`rustdoc` 软链到
+  `staging_dir/host/bin`；OpenWrt 认为 rust 已装好，直接使用 runner 的编译器；
+- 失败时只打 warning 并回退到源码构建，不阻断固件；toolchain 固定到 feed 的
+  `PKG_VERSION`，避免 runner `stable` 漂移导致包编不过。
+
+### 宿主 Go / LLVM / Python
+
+`prepare-build-host.sh` 在编译前做三件事：
+
+- `CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT=$(go env GOROOT)`：直接用 runner 的 Go，
+  跳过 host Go 编译器构建；
+- eBPF 构建时（`.config` 有 `CONFIG_BPF_TOOLCHAIN_HOST=y`）写
+  `CONFIG_BPF_TOOLCHAIN_HOST_PATH=$(llvm-config --prefix)`，并做一次
+  `clang --target=bpfel` smoke test，避免从源码编 LLVM；
+- 只改 `HOST_CONFIGURE_ARGS`，把 host Python 的 `--enable-optimizations`
+  换成 `--disable-optimizations`，target Python 不变。
+
+### 编译耗时报告
+
+编译步骤设置 `BUILD_TIME_LOG=build-time.tsv`，`patch-build-time-log.py` 在
+`rules.mk` + `include/package.mk` 注入每个包的 prepare/configure/compile/install
+起止事件。编译结束后 `scripts/build-time-report.pl -n 30` 输出 Top 30 慢包，
+打印到 CI 日志并上传 `build-time-<machine>-<target>` artifact（保留 7 天）。
+失败时也会生成，便于定位卡在哪个包。
 
 ### lite 机型与缓存预热
 

@@ -2,8 +2,8 @@ name: Build Rockchip 25.12 (Linux 6.18) — 工具链 + 固件
 
 # 把 build-toolchain-cache.yml 和 build-rockchip-2512-618.yml 合并成一个工作流：
 #   1) job toolchain：检查工具链缓存；auto 命中就跳过构建，miss（或 tc_mode=rebuild）
-#      才编 tools + toolchain，可选预热 llvm/mesa（panfrost）和 ruby/rust（rust），
-#      结果存 Actions 缓存 + Release；
+#      才编 tools + toolchain，可选预热 llvm/mesa（panfrost），
+#      结果存 Actions 缓存 + Release；rust 由 job 2 用 runner rustup 注入；
 #   2) job build：matrix 编译固件，工具链直接复用 job 1 刚保存的缓存（同一 key），
 #      不用再单独跑一次 Build Toolchain Cache。
 #
@@ -64,14 +64,6 @@ on:
         options:
         - 'false'
         - 'true'
-      rust:
-        description: '重建工具链时顺带预热 ruby/rust（rustc）'
-        required: true
-        default: 'false'
-        type: choice
-        options:
-        - 'false'
-        - 'true'
 
 env:
   TZ: Asia/Shanghai
@@ -106,7 +98,6 @@ jobs:
       Target_CFG_Machine: ${{ github.event.inputs.MACH }}
       SFE_INPUT_STATUS: 'false'
       PANFROST: ${{ github.event.inputs.panfrost || 'false' }}
-      RUST: ${{ github.event.inputs.rust || 'false' }}
       TC_MODE: ${{ github.event.inputs.tc_mode || 'auto' }}
 
     steps:
@@ -229,9 +220,6 @@ jobs:
         ccache: 'true'
         toolchain: 'true'
         skip: 'true'
-        extra_paths: |
-          .sccache
-          .rust-stamps
         mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
         skip_saving: 'true'
@@ -243,12 +231,10 @@ jobs:
         echo -e "$(nproc) thread toolchain compile"
         make -j$(nproc) tools/install toolchain/install
 
-    - name: 预热 libmesa-panfrost / ruby+rust
-      if: (env.TC_MODE == 'rebuild' || steps.tc_check.outputs.hit != '1') && (env.PANFROST == 'true' || env.RUST == 'true')
-      # 用最小 .config 只编需要预热的东西，产物进 .ccache；随后缓存步骤会把
-      # .ccache 一起存进工具链缓存，固件构建恢复工具链时就能直接命中。
-      #   panfrost=true：libmesa-panfrost → llvm/mesa（-j1 构建，冷编很慢）
-      #   rust=true    ：ruby + RUBY_ENABLE_YJIT=true → rust/host（rustc，约 4h）
+    - name: 预热 libmesa-panfrost
+      if: (env.TC_MODE == 'rebuild' || steps.tc_check.outputs.hit != '1') && env.PANFROST == 'true'
+      # 用最小 .config 只编 libmesa-panfrost（llvm/mesa），产物进 .ccache；
+      # 固件构建恢复工具链时就能命中。rust 改由固件端 runner rustup 注入。
       working-directory: ./openwrt
       env:
         CCACHE_MAXSIZE: 3G
@@ -260,21 +246,13 @@ jobs:
           if [ "${PANFROST:-false}" = 'true' ]; then
             echo 'CONFIG_PACKAGE_libmesa-panfrost=y'
           fi
-          if [ "${RUST:-false}" = 'true' ]; then
-            echo 'CONFIG_PACKAGE_ruby=y'
-            echo 'CONFIG_RUBY_ENABLE_YJIT=y'
-            echo 'CONFIG_RUST_SCCACHE=y'
-          fi
         } > .config
         make -s defconfig
         echo "预热配置："
-        grep -E 'CONFIG_PACKAGE_(libmesa-panfrost|ruby)=|CONFIG_RUBY_ENABLE_YJIT|CONFIG_PACKAGE_llvm=' .config || true
-        # 限时：只预热 panfrost 时 3.5h；带 rust 时 4h（rust 单编约 4h，job 上限 330min）
+        grep -E 'CONFIG_PACKAGE_(libmesa-panfrost|llvm)=' .config || true
+        # 限时 3.5h（job 上限 330min）
         warm_timeout=12600
-        if [ "${RUST:-false}" = 'true' ]; then
-          warm_timeout=14400
-        fi
-        # 磁盘看门狗：预热（rust/llvm）最容易把 runner 磁盘写满，低了就收手
+        # 磁盘看门狗：预热（llvm/mesa）最容易把 runner 磁盘写满，低了就收手
         (
           while true; do
             avail=$(df --output=avail -BG / 2>/dev/null | tail -n1 | tr -dc '0-9')
@@ -292,15 +270,6 @@ jobs:
         timeout "$warm_timeout" make -j$(nproc) world || true
         kill "$disk_watchdog" 2>/dev/null || true
         ccache -s || true
-        # 如果本次编了 rust，把它的 stamp 收集到 .rust-stamps（只有几个文件），
-        # 固件端恢复后 make 会认为 rust/host 已完成，直接跳过 4h 的 rust 构建。
-        rust_build=$(ls -d build_dir/target-*/host/rustc-*-src 2>/dev/null | head -n1 || true)
-        if [ -n "$rust_build" ] && [ -f "$rust_build/.built" ]; then
-          mkdir -p ".rust-stamps/host/$(basename "$rust_build")"
-          cp -a "$rust_build"/.prepared* "$rust_build"/.configured "$rust_build"/.built \
-            ".rust-stamps/host/$(basename "$rust_build")/"
-          echo "已收集 rust stamps: $(basename "$rust_build")"
-        fi
 
     - name: 保存工具链到 Actions 缓存
       if: (env.TC_MODE == 'rebuild' || steps.tc_check.outputs.hit != '1')
@@ -309,12 +278,7 @@ jobs:
         ccache: 'true'
         toolchain: 'true'
         skip: 'true'
-        # rust 预热时把 sccache 和 rust 的编译 stamp 一起存进工具链缓存：
-        #   .sccache     —— rustc crate 缓存
-        #   .rust-stamps —— 只有几个 stamp，固件端恢复后 make 直接跳过 rust 构建
-        extra_paths: |
-          .sccache
-          .rust-stamps
+        # rust 改由固件构建端用 runner rustup 注入，工具链缓存不再保存 rust 相关路径
         mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
 
@@ -548,6 +512,25 @@ jobs:
         echo "------------------------"
         awk '/turboacc/ { print }' .config
 
+    - name: 准备宿主工具链（Rust/Go/LLVM/Python）
+      if: steps.config.outputs.status == 'success'
+      working-directory: ./openwrt
+      run: |
+        # rust：用 runner 的 rustup 替换 rust/host 源码构建（4h -> 1min）
+        bash "$GITHUB_WORKSPACE/.github/scripts/prepare-rust.sh" || \
+          echo "::warning ::Rust 注入失败，回退到源码构建"
+        # Go / eBPF LLVM / host Python PGO：能用 runner 的就不从源码编
+        bash "$GITHUB_WORKSPACE/.github/scripts/prepare-build-host.sh" || \
+          echo "::warning ::宿主工具链准备失败，保持 OpenWrt 默认行为"
+
+    - name: 注入编译耗时统计
+      if: steps.config.outputs.status == 'success'
+      working-directory: ./openwrt
+      run: |
+        python3 "$GITHUB_WORKSPACE/.github/scripts/patch-build-time-log.py" . \
+          --scripts-dir "$GITHUB_WORKSPACE/.github/scripts" || \
+          echo "::warning ::编译耗时统计注入失败，跳过报告"
+
     - name: 下载包文件
       if: steps.config.outputs.status == 'success'
       run: |
@@ -564,17 +547,11 @@ jobs:
       if: env.Cache == '1' && !cancelled()
       uses: lunatickochiya/cachewrtbuild@save-on-failure
       with:
-        # ccache/.sccache/.rust-stamps 一起恢复：工具链缓存里可能带
-        # build-toolchain-cache.yml 预热好的 llvm/mesa、rust 对象和 rust 编译戳；
-        # paths 必须和保存端完全一致
-        # （staging_dir/host*, staging_dir/tool*, .sccache, .rust-stamps, .ccache），
-        # actions/cache 的 version 才匹配。
+        # 工具链缓存只含 staging_dir/host*、staging_dir/tool* 和 .ccache。
+        # rust 不再预热（固件端用 runner rustup 注入），所以不再带 .rust-stamps。
         ccache: 'true'
         toolchain: 'true'
         skip: 'true'
-        extra_paths: |
-          .sccache
-          .rust-stamps
         mixkey: tc-${{ env.OpenWrt_PATCH_FILE_DIR }}${{ env.eBPF }}
         prefix: ${{ github.workspace }}/openwrt
         skip_saving: 'true'
@@ -638,22 +615,20 @@ jobs:
           echo "已补齐 b43-fwsquash.py"
         fi
 
-    - name: 恢复 rust 预编译戳（跳过 rust 重编）
-      # 工具链缓存里的 .rust-stamps 只包含 .prepared*/.configured/.built 几个文件。
-      # 复制到 build_dir 后，make 会认为 rust/host 已经编译完成（staging 里的
-      # .rust_installed 也在工具链缓存中），直接跳过 4h 的 rust 构建。
-      # 如果 rust 包内容变了（stamp 名里的 md5 变化），会自动回退到正常编译。
+    - name: 修正工具链缓存时间戳
+      # actions/cache 解压后 mtime 可能早于源码，make 会把 host/tool stamp 判为过期，
+      # 白重编一遍工具链。touch 一下 stamp，再补 tmp/.build（所有 stamp 的公共依赖）。
       if: (!cancelled())
       working-directory: ./openwrt
       run: |
-        if [ -d .rust-stamps/host ]; then
-          for t in build_dir/target-*/; do
-            [ -d "$t" ] || continue
-            mkdir -p "$t/host"
-            cp -a .rust-stamps/host/. "$t/host/"
-          done
-          echo "已恢复 rust 编译戳: $(ls .rust-stamps/host)"
+        if [ -d staging_dir ]; then
+          find staging_dir -type d -name stamp -not -path "*target*" -print0 2>/dev/null |
+            while IFS= read -r -d '' d; do
+              find "$d" -type f -exec touch {} + 2>/dev/null || true
+            done
         fi
+        mkdir -p tmp
+        echo 1 > tmp/.build
 
     - name: 编译固件
       id: compile
@@ -665,6 +640,8 @@ jobs:
         BUILD_JOB_STOP_SECONDS: '21300'
         CACHE_RESERVE_SECONDS: '300'
         BUILD_JOB_SETUP_MARGIN_SECONDS: '60'
+        # 每个包的 prepare/configure/compile/install 起止时间，编译后汇总 Top 30
+        BUILD_TIME_LOG: 'build-time.tsv'
         # ccache 上限 6G：太小内核对象会被后续包挤出（内核冷编 40+ 分钟），
         # 太大又会把 runner 145G 磁盘和 10G 缓存配额吃满（曾出现 runner 直接崩溃）。
         CCACHE_MAXSIZE: '6G'
@@ -719,6 +696,31 @@ jobs:
         # rust 的 sccache 命中率（没有 rust 构建时输出为 0）
         sccache --show-stats 2>/dev/null | head -20 || true
         echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 生成编译耗时报告
+      # 失败也生成，便于判断是哪个包/阶段拖慢或卡住
+      if: always()
+      continue-on-error: true
+      working-directory: ./openwrt
+      run: |
+        if [ -s build-time.tsv ]; then
+          scripts/build-time-report.pl -n 30 build-time.tsv > build-time-report.txt 2>&1 || true
+          cp -f build-time-report.txt "$GITHUB_WORKSPACE/build-time-report.txt" || true
+          echo "===== 编译耗时 Top 30 ====="
+          cat build-time-report.txt || true
+        else
+          echo "::notice ::没有 build-time.tsv，跳过耗时报告"
+        fi
+
+    - name: 上传编译耗时报告
+      if: always()
+      continue-on-error: true
+      uses: actions/upload-artifact@main
+      with:
+        name: build-time-${{ needs.prepare.outputs.machine }}-${{ matrix.target }}
+        path: build-time-report.txt
+        if-no-files-found: ignore
+        retention-days: 7
 
     - name: 上传编译日志
       # 只在失败时上传；compile.log 是编译过程的 stderr（真实报错），通常很小
