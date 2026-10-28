@@ -229,8 +229,8 @@ make[3]: *** [.../kmod-b43-...apk] Error 127
 
 ```
 基础参数 -> 机型/设备 -> 网络基础/防火墙 -> 代理 -> VPN/隧道 -> 内网穿透 -> IPTV/组播
--> 下载/网盘/媒体 -> 存储/文件共享（NAS） -> 容器/Docker -> 打印/外设 -> 主题/界面
--> 监控/系统 -> 网络服务 -> 工具 -> 视频/硬件加速 -> 构建选项 -> 其他
+-> 下载/网盘/媒体 -> 存储/文件共享（NAS） -> 容器/Docker -> 打印/外设 -> UPS/电源管理
+-> 主题/界面 -> 监控/系统 -> 网络服务 -> 工具 -> 视频/硬件加速 -> 构建选项 -> 其他
 ```
 
 机型差异只在同一分区内的条目上，不再需要逐行比对整份文件。
@@ -246,9 +246,16 @@ make[3]: *** [.../kmod-b43-...apk] Error 127
   去掉代理/下载/媒体/监控/多主题/panfrost 等重包，但补齐 NAS 所需的存储栈：
   `smartmontools`/`smartd`、`nfs-kernel-server-v4`、`mdadm` + `kmod-md-raid456`、
   `btrfs-progs`、`exfat-mkfs`/`exfat-fsck`、`xfs-mkfs`/`xfs-fsck`/`xfs-growfs`、
-  `e2fsprogs`/`tune2fs`/`resize2fs`、`dosfstools`、`parted`、`hdparm`、`nvme-cli`、
-  `kmod-nvme`、`kmod-usb3`、`luci-app-diskman`、`luci-app-hd-idle`，以及 **ksmbd**
-  内核态 SMB（`ksmbd-server` + `luci-app-ksmbd` + `wsdd2`）。
+  `e2fsprogs`/`tune2fs`/`resize2fs`、`dosfstools`、`parted`、`gdisk`、`fstrim`、
+  `hdparm`、`nvme-cli`、`kmod-nvme`、`kmod-usb3`、`kmod-usb-storage-extras`、
+  `luci-app-diskman`、`luci-app-hd-idle`，以及 **ksmbd** 内核态 SMB
+  （`ksmbd-server` + `luci-app-ksmbd` + `wsdd2`）。
+- 额外的 NAS 常用能力（lite 与完整版都有）：LVM/加密（`kmod-dm`、`lvm2`、
+  `cryptsetup`）、SFTP（`openssh-sftp-server`）、Bonjour/mDNS
+  （`avahi-dbus-daemon`）、SMART 硬盘库（`smartmontools-drivedb`）、XFS 管理
+  （`xfs-admin`）、UPS 监控（`nut-server`、`nut-upsmon`、`nut-driver-usbhid-ups`、
+  `luci-app-nut`，USB UPS 直接可用）、温度/电压传感器（`lm-sensors`）、
+  性能与排障工具（`sysstat`、`htop`、`ncdu`、`tmux`、`pciutils`、`ethtool`）。
 - shimeta 系列额外带 IPTV：`igmpproxy` + `luci-app-rtp2httpd` + `luci-app-udpxy`
   （完整版另有 `luci-app-msd_lite`）。
 
