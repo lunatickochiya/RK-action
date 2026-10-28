@@ -4,6 +4,20 @@ START=15
 
 start() {
 	[ "$(board_name)" = "shimeta,rk3588-aiot3588a" ] || return 0
-	[ -c /dev/dri/card0 ] || mknod /dev/dri/card0 c 226 128
-	[ -c /dev/dri/renderD129 ] || mknod /dev/dri/renderD129 c 226 128
+
+	# The vendor rknpu driver registers a render-only DRM device.  Its
+	# render minor depends on probe order relative to panthor, so create
+	# /dev/rknpu from sysfs instead of assuming renderD128/renderD129.
+	for d in /sys/class/drm/renderD*; do
+		[ -e "$d/device/driver" ] || continue
+		case "$(basename "$(readlink -f "$d/device/driver")")" in
+		RKNPU|rknpu)
+			node="/dev/dri/$(basename "$d")"
+			[ -e "$node" ] || continue
+			ln -sf "$node" /dev/rknpu
+			chmod 666 "$node"
+			break
+			;;
+		esac
+	done
 }
