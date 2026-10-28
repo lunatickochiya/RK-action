@@ -1,0 +1,11 @@
+{
+	"luci-app-modechange": {
+		"description": "Grant access to switch Ethernet ports between LAN and WAN",
+		"read": {
+			"uci": [ "modechange", "network" ]
+		},
+		"write": {
+			"uci": [ "modechange", "network" ]
+		}
+	}
+}

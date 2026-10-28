@@ -1,0 +1,389 @@
+#!/bin/sh
+#=================================================
+# modechange - 在 LAN 和 WAN 之间切换物理网口
+#
+# 用法:
+#   modechange list             列出物理网口及其角色
+#   modechange status           显示当前 LAN/WAN 配置
+#   modechange lan [网口]       把网口设为 LAN（默认: 当前 WAN 口）
+#   modechange wan [网口]       把网口设为 WAN（默认: 当前 LAN 口）
+#   modechange apply            2 秒后重启网络和防火墙
+#   modechange restart          立即重启网络和防火墙
+#
+# 只修改 /etc/config/network 中网口的归属。切换为 LAN 时保留 WAN
+# 接口配置并设置 auto=0，切回 WAN 时直接恢复，不会丢失 PPPoE 等设置。
+#=================================================
+
+BRIDGE=br-lan
+SYS_CLASS_NET=${SYS_CLASS_NET:-/sys/class/net}
+PATH=/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}
+export PATH
+
+say() { printf '%s\n' "$*"; }
+err() { printf '错误: %s\n' "$*" >&2; }
+die() { err "$*"; exit 1; }
+
+command -v uci >/dev/null 2>&1 || die "找不到 uci 命令"
+
+# 只列出真正的物理以太网口，排除 lo / 网桥 / 无线 / VPN / 容器等虚拟接口
+list_ports() {
+	local d p
+	for d in "$SYS_CLASS_NET"/*; do
+		[ -e "$d" ] || continue
+		p=${d##*/}
+		case "$p" in
+			lo|br-*|bond*|vlan*|*.?*|wlan*|wlp*|phy*|ppp*|pppoe*|wg*|tun*|tap*|docker*|veth*|virbr*|sit*|gre*|gretap*|erspan*|ip6*|ifb*|dummy*|rmnet*|wwan*|bnep*|bluetooth*|can*|tailscale*|nebula*|singbox*|clash*|utun*)
+				continue
+				;;
+		esac
+		[ "$(cat "$d/type" 2>/dev/null)" = "1" ] || continue
+		printf '%s\n' "$p"
+	done
+}
+
+is_port() {
+	local p
+	for p in $(list_ports); do
+		[ "$p" = "$1" ] && return 0
+	done
+	return 1
+}
+
+# 查找名为 br-lan 的 config device 段（可能是 @device[0]，也可能是具名段）
+bridge_section() {
+	uci -q show network 2>/dev/null |
+		sed -n "s/^network\.\([^.]*\)\.name='$BRIDGE'\$/\1/p" |
+		head -n 1
+}
+
+device_section_by_name() {
+	uci -q show network 2>/dev/null |
+		sed -n "s/^network\.\([^.]*\)\.name='$1'\$/\1/p" |
+		head -n 1
+}
+
+device_ports_of() {
+	local dev=$1 sec
+	case "$dev" in
+		"$BRIDGE"|br-*)
+			sec=$(device_section_by_name "$dev")
+			[ -n "$sec" ] && uci -q get "network.$sec.ports"
+			;;
+		*)
+			printf '%s\n' "$dev"
+			;;
+	esac
+}
+
+lan_ports() {
+	local dev
+	dev=$(uci -q get network.lan.device)
+	[ -z "$dev" ] && dev=$(uci -q get network.lan.ifname)
+	[ -z "$dev" ] && dev=$BRIDGE
+	device_ports_of "$dev"
+}
+
+wan_device() {
+	local dev
+	dev=$(uci -q get network.wan.device)
+	[ -z "$dev" ] && dev=$(uci -q get network.wan.ifname)
+	printf '%s\n' "$dev"
+}
+
+wan_ports() {
+	local dev
+	dev=$(wan_device)
+	[ -n "$dev" ] && device_ports_of "$dev"
+}
+
+wan_enabled() {
+	[ -n "$(uci -q get network.wan)" ] || return 1
+	case "$(uci -q get network.wan.disabled)" in
+		1|true|yes|on) return 1 ;;
+	esac
+	case "$(uci -q get network.wan.auto)" in
+		0|false|no|off) return 1 ;;
+	esac
+	return 0
+}
+
+port_role() {
+	local p=$1 x
+	if wan_enabled; then
+		for x in $(wan_ports); do
+			[ "$x" = "$p" ] && { printf 'wan\n'; return; }
+		done
+	fi
+	for x in $(lan_ports); do
+		[ "$x" = "$p" ] && { printf 'lan\n'; return; }
+	done
+	printf 'unused\n'
+}
+
+first_lan_port() {
+	local x
+	for x in $(lan_ports); do
+		is_port "$x" && { printf '%s\n' "$x"; return; }
+	done
+}
+
+first_wan_port() {
+	local x
+	for x in $(wan_ports); do
+		is_port "$x" && { printf '%s\n' "$x"; return; }
+	done
+}
+
+first_port() {
+	list_ports | head -n 1
+}
+
+# 确保 br-lan 存在，并把 LAN 接口指向它；旧的 /etc/config/network 里
+# LAN 直接绑在物理口上的，会把那个口迁移进 br-lan 的 ports。
+ensure_bridge() {
+	local sec cur p ports
+	sec=$(bridge_section)
+	if [ -z "$sec" ]; then
+		sec=$(uci add network device)
+		[ -n "$sec" ] || die "无法创建 $BRIDGE 设备"
+		uci -q set "network.$sec.name=$BRIDGE"
+		uci -q set "network.$sec.type=bridge"
+	fi
+	[ "$(uci -q get "network.$sec.type")" = "bridge" ] ||
+		uci -q set "network.$sec.type=bridge"
+	# WAN 模式下 br-lan 可能一个物理口都没有（LAN 只走 WiFi），
+	# 必须允许空网桥，否则 netifd 不会创建 br-lan，hostapd 也无法把无线加进去。
+	[ "$(uci -q get "network.$sec.bridge_empty")" = "1" ] ||
+		uci -q set "network.$sec.bridge_empty=1"
+
+	cur=$(uci -q get network.lan.device)
+	[ -z "$cur" ] && cur=$(uci -q get network.lan.ifname)
+	case "$cur" in
+		""|"$BRIDGE"|br-*) ;;
+		*)
+			ports=$(uci -q get "network.$sec.ports")
+			for p in $cur; do
+				is_port "$p" || continue
+				case " $ports " in
+					*" $p "*) ;;
+					*) uci -q add_list "network.$sec.ports=$p"; ports="$ports $p" ;;
+				esac
+			done
+			;;
+	esac
+
+	uci -q set network.lan.device="$BRIDGE"
+	uci -q delete network.lan.ifname
+	uci -q delete network.lan.type
+	uci -q delete network.lan._orig_ifname
+	uci -q delete network.lan._orig_bridge
+	printf '%s\n' "$sec"
+}
+
+# 从所有网桥的 ports 以及老式 lan.ifname 中移除指定网口
+remove_port_from_bridges() {
+	local p=$1 sec cur new x after
+	for sec in $(uci -q show network 2>/dev/null |
+		sed -n 's/^network\.\([^.]*\)\.ports=.*/\1/p' | sort -u); do
+		cur=$(uci -q get "network.$sec.ports")
+		case " $cur " in
+			*" $p "*)
+				uci -q del_list "network.$sec.ports=$p"
+				# 老配置可能把 ports 写成字符串，del_list 不会生效，
+				# 这里再检查一次并重建成真正的 UCI 列表
+				after=$(uci -q get "network.$sec.ports")
+				case " $after " in
+					*" $p "*)
+						uci -q delete "network.$sec.ports"
+						for x in $cur; do
+							[ "$x" = "$p" ] ||
+								uci -q add_list "network.$sec.ports=$x"
+						done
+						;;
+				esac
+				;;
+		esac
+	done
+
+	cur=$(uci -q get network.lan.ifname)
+	if [ -n "$cur" ]; then
+		new=""
+		for x in $cur; do
+			[ "$x" = "$p" ] || new="$new $x"
+		done
+		new=${new# }
+		if [ -n "$new" ]; then
+			uci -q set network.lan.ifname="$new"
+		else
+			uci -q delete network.lan.ifname
+		fi
+	fi
+}
+
+set_wan() {
+	local p=$1 proto
+	ensure_bridge >/dev/null
+	remove_port_from_bridges "$p"
+
+	proto=$(uci -q get network.wan.proto)
+	case "$proto" in
+		""|none) proto=dhcp ;;
+	esac
+
+	uci -q get network.wan >/dev/null || uci -q set network.wan=interface
+	uci -q set network.wan.proto="$proto"
+	uci -q set network.wan.device="$p"
+	uci -q set network.wan.auto=1
+	uci -q delete network.wan.disabled
+	uci -q delete network.wan.ifname
+	uci -q delete network.wan.type
+
+	if uci -q get network.wan6 >/dev/null; then
+		uci -q set network.wan6.device="$p"
+		uci -q set network.wan6.auto=1
+		uci -q delete network.wan6.disabled
+		uci -q delete network.wan6.ifname
+	fi
+
+	uci -q commit network || die "提交 network 配置失败"
+	say "已将 $p 设为 WAN 口"
+}
+
+set_lan() {
+	local p=$1 sec cur
+	sec=$(ensure_bridge)
+	remove_port_from_bridges "$p"
+
+	cur=$(uci -q get "network.$sec.ports")
+	case " $cur " in
+		*" $p "*) ;;
+		*) uci -q add_list "network.$sec.ports=$p" ;;
+	esac
+
+	if [ "$(wan_device)" = "$p" ]; then
+		[ -n "$(uci -q get network.wan.device)" ] ||
+			uci -q set network.wan.device="$p"
+		uci -q delete network.wan.ifname
+		uci -q set network.wan.auto=0
+	fi
+
+	case "$(uci -q get network.wan6.device)" in
+		"$p"|"@wan")
+			uci -q set network.wan6.auto=0
+			;;
+		*)
+			if [ "$(uci -q get network.wan6.ifname)" = "$p" ]; then
+				uci -q set network.wan6.device="$p"
+				uci -q delete network.wan6.ifname
+				uci -q set network.wan6.auto=0
+			fi
+			;;
+	esac
+
+	uci -q commit network || die "提交 network 配置失败"
+	say "已将 $p 设为 LAN 口"
+}
+
+lan_ip() {
+	local ip
+	ip=$(uci -q get network.lan.ipaddr | head -n 1 | awk '{ print $1 }')
+	if [ -z "$ip" ]; then
+		ip=$(ubus call network.interface.lan status 2>/dev/null |
+			tr ',' '\n' |
+			sed -n 's/.*"address"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+			head -n 1)
+	fi
+	printf '%s\n' "$ip"
+}
+
+wan_ip() {
+	ubus call network.interface.wan status 2>/dev/null |
+		tr ',' '\n' |
+		sed -n 's/.*"address"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' |
+		head -n 1
+}
+
+show_status() {
+	local lp wp ip proto lan_dev
+	lp=$(lan_ports | tr '\n' ' ')
+	wp=$(wan_ports | tr '\n' ' ')
+	lp=${lp% }
+	wp=${wp% }
+	ip=$(lan_ip)
+	say "LAN: ${lp:-无}  ${ip:+($ip)}"
+	lan_dev=$(uci -q get network.lan.device)
+	if [ -z "$lan_dev" ] ||
+	   { [ "$lan_dev" = "$BRIDGE" ] && [ -z "$(bridge_section)" ]; }; then
+		say "提示: LAN 接口配置不完整（旧版脚本可能留下了坏配置），点击“设为 LAN 口”可自动修复。"
+	fi
+
+	if [ -z "$(uci -q get network.wan)" ]; then
+		say "WAN: 未配置"
+	elif wan_enabled; then
+		proto=$(uci -q get network.wan.proto)
+		[ -z "$proto" ] && proto=dhcp
+		ip=$(wan_ip)
+		say "WAN: ${wp:-无}  ($proto${ip:+, $ip})"
+	else
+		say "WAN: ${wp:-无}  (已停用)"
+	fi
+
+	say ""
+	say "端口:"
+	for dev in $(list_ports); do
+		say "  $dev  $(port_role "$dev")"
+	done
+}
+
+show_list() {
+	local p
+	for p in $(list_ports); do
+		printf '%s %s\n' "$p" "$(port_role "$p")"
+	done
+}
+
+do_restart() {
+	/etc/init.d/network restart
+	sleep 1
+	/etc/init.d/firewall reload 2>/dev/null
+}
+
+action=$1
+p=$2
+case "$action" in
+	list)
+		show_list
+		;;
+	status)
+		show_status
+		;;
+	lan)
+		[ -n "$p" ] || p=$(first_wan_port)
+		[ -n "$p" ] || p=$(first_lan_port)
+		[ -n "$p" ] || p=$(first_port)
+		[ -n "$p" ] || die "没有检测到物理网口"
+		is_port "$p" || die "$p 不是可用的物理网口"
+		set_lan "$p"
+		;;
+	wan)
+		[ -n "$p" ] || p=$(first_lan_port)
+		[ -n "$p" ] || p=$(first_wan_port)
+		[ -n "$p" ] || p=$(first_port)
+		[ -n "$p" ] || die "没有检测到物理网口"
+		is_port "$p" || die "$p 不是可用的物理网口"
+		set_wan "$p"
+		;;
+	apply)
+		( sleep 2; /etc/init.d/network restart; sleep 1; /etc/init.d/firewall reload ) >/dev/null 2>&1 &
+		say "2 秒后重启网络"
+		;;
+	restart)
+		do_restart
+		;;
+	*)
+		cat <<EOF
+用法: $0 {list|status|lan [网口]|wan [网口]|apply|restart}
+EOF
+		exit 1
+		;;
+esac
