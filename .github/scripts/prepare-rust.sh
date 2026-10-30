@@ -22,6 +22,13 @@ if [ ! -f "$RUST_MAKEFILE" ]; then
 	exit 0
 fi
 
+# 没有选中 rust 相关包时不必下载/安装 toolchain（SDK 只编几个 LuCI 包时很常见）。
+# 列表覆盖 OpenWrt 里常见的 rust/host 消费者；漏掉的包会回退到源码构建，不会出错。
+if [ -f .config ] && ! grep -qE '^CONFIG_PACKAGE_(rust|ruby|luci-app-quickfile|shadowsocks-rust|python3-cryptography|fish|ripgrep|eza|lsd|procs|dufs|bottom|netavark|aardvark-dns)=' .config; then
+	echo "no rust consumers in .config, skip rust injection"
+	exit 0
+fi
+
 FEED_VERSION=$(sed -n 's/^PKG_VERSION:=//p' "$RUST_MAKEFILE" | head -n1 | tr -d '[:space:]')
 FEED_VERSION=${FEED_VERSION%%-*}
 if [ -z "$FEED_VERSION" ]; then
