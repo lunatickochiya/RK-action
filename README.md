@@ -163,13 +163,19 @@ stderr，文件通常只有几十 KB。
 `cp tools/b43-tools/files/b43-fwsquash.py staging_dir/host/bin/` 即可（秒级）；
 不要用 `make tools/install` 去补，那会把一批 host 工具重编，多花十几分钟。
 
-### 在工具链缓存里预热 libmesa-panfrost（可选）
+### 在工具链缓存里预热 libmesa-panfrost / ffmpeg-mpp（可选）
 
-`Build Toolchain Cache (Rockchip)` 有一个 `panfrost` 选项（默认 `false`）。
-开启后，在 `tools + toolchain` 编译完之后，会用一份**最小 `.config`**（只保留
-`CONFIG_TARGET_*` 加 `CONFIG_PACKAGE_libmesa-panfrost=y`）跑 `make world`，
-把编译产物写进 `.ccache`，并随工具链缓存一起保存（限时 3.5 小时；
-llvm/mesa 是 -j1 构建，冷编很慢）。
+`Build Toolchain Cache (Rockchip)` 有 `panfrost`、`ffmpeg_mpp` 两个选项（默认都 `false`）：
+
+- `panfrost=true`：用最小 `.config`（只保留 `CONFIG_TARGET_*` 加
+  `CONFIG_PACKAGE_libmesa-panfrost=y`）跑 `make world`，限时 3.5 小时
+  （llvm/mesa 是 -j1 构建，冷编很慢）；
+- `ffmpeg_mpp=true`：用**完整 `.config`**（即当前机型的 machine/package config，
+  已包含 `ffmpeg-mpp=y`）只编 `package/rockchip/ffmpeg-mpp`，依赖一起编，
+  限时 1 小时。配合 `0004-package-ffmpeg-mpp-parallel-ccache.patch`
+  （并行 + `--cc=ccache`），冷编约 12~15 分钟，产物全部进 `.ccache`。
+
+两者可以只开一个，也可以都开（都开时预热总时长可能接近 4.5 小时）。
 
 固件构建的「恢复工具链」步骤现在会连 `.ccache` 一起恢复（paths 必须和保存端一致，
 否则 actions/cache 的 cache version 对不上），所以：

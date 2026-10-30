@@ -56,6 +56,14 @@ on:
         options:
         - 'false'
         - 'true'
+      ffmpeg_mpp:
+        description: '顺带编译 ffmpeg-mpp（含依赖）并把对象存进工具链 ccache'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+        - 'false'
+        - 'true'
 
 env:
   TZ: Asia/Shanghai
@@ -72,6 +80,7 @@ jobs:
       Target_CFG_Machine: ${{ github.event.inputs.machine || 'ztl-joyrock' }}
       SFE_INPUT_STATUS: 'false'
       PANFROST: ${{ github.event.inputs.panfrost || 'false' }}
+      FFMPEG_MPP: ${{ github.event.inputs.ffmpeg_mpp || 'false' }}
 
     steps:
     - name: 检查
@@ -189,29 +198,18 @@ jobs:
         echo -e "$(nproc) thread toolchain compile"
         make -j$(nproc) tools/install toolchain/install
 
-    - name: 预热 libmesa-panfrost
-      # 用最小 .config 只编 libmesa-panfrost（llvm/mesa），产物进 .ccache；
-      # 随后缓存步骤会把 .ccache 一起存进工具链缓存，固件构建恢复工具链时就能命中。
+    - name: 预热 libmesa-panfrost / ffmpeg-mpp
+      # 可选预热：产物写进 .ccache，随工具链缓存保存，固件构建恢复后直接命中。
+      #   panfrost：最小 .config + make world（llvm/mesa，-j1 很慢）
+      #   ffmpeg_mpp：完整 .config + 只编 package/rockchip/ffmpeg-mpp（依赖已选中）
       # rust 不再预热：固件构建端用 runner 的 rustup 直接替换 rust/host。
-      if: env.PANFROST == 'true'
+      if: env.PANFROST == 'true' || env.FFMPEG_MPP == 'true'
       working-directory: ./openwrt
       env:
         CCACHE_MAXSIZE: 3G
       run: |
         cp .config /tmp/toolchain.full.config
-        {
-          grep -E '^CONFIG_TARGET_' /tmp/toolchain.full.config || true
-          echo 'CONFIG_CCACHE=y'
-          if [ "${PANFROST:-false}" = 'true' ]; then
-            echo 'CONFIG_PACKAGE_libmesa-panfrost=y'
-          fi
-        } > .config
-        make -s defconfig
-        echo "预热配置："
-        grep -E 'CONFIG_PACKAGE_(libmesa-panfrost|llvm)=' .config || true
-        # 限时 3.5h（job 上限 330min）
-        warm_timeout=12600
-        # 磁盘看门狗：预热（llvm/mesa）最容易把 runner 磁盘写满，低了就收手
+        # 磁盘看门狗：预热最容易把 runner 磁盘写满，低了就收手
         (
           while true; do
             avail=$(df --output=avail -BG / 2>/dev/null | tail -n1 | tr -dc '0-9')
@@ -226,7 +224,28 @@ jobs:
           done
         ) &
         disk_watchdog=$!
-        timeout "$warm_timeout" make -j$(nproc) world || true
+
+        if [ "${PANFROST:-false}" = 'true' ]; then
+          {
+            grep -E '^CONFIG_TARGET_' /tmp/toolchain.full.config || true
+            echo 'CONFIG_CCACHE=y'
+            echo 'CONFIG_PACKAGE_libmesa-panfrost=y'
+          } > .config
+          make -s defconfig
+          echo "panfrost 预热配置："
+          grep -E 'CONFIG_PACKAGE_(libmesa-panfrost|llvm)=' .config || true
+          timeout 12600 make -j$(nproc) world || true
+        fi
+
+        if [ "${FFMPEG_MPP:-false}" = 'true' ]; then
+          cp /tmp/toolchain.full.config .config
+          grep -q '^CONFIG_PACKAGE_ffmpeg-mpp=y' .config || echo 'CONFIG_PACKAGE_ffmpeg-mpp=y' >> .config
+          make -s defconfig
+          echo "ffmpeg-mpp 预热配置："
+          grep -E 'CONFIG_PACKAGE_(ffmpeg-mpp|libffmpeg-mpp)=' .config || true
+          timeout 3600 make -j$(nproc) package/rockchip/ffmpeg-mpp/compile || true
+        fi
+
         kill "$disk_watchdog" 2>/dev/null || true
         ccache -s || true
 
