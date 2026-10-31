@@ -376,8 +376,11 @@ openwrt-2512-618-rk/           # 6.18 需要套在源码树上的补丁/资源
   如果以后源码树换回没有这两个补丁的分支，把它们加回排除表即可。
 - 6.18 工作流默认 `TEST_KERNEL=0`；6.18 分支的 `KERNEL_PATCHVER` 已经是 6.18，不要用
   6.6 的 testing kernel 逻辑。
-- 6.18 的 SFE `hack-6.18/952`、`953` 补丁在 linux-6.18.52 上会带 offset/fuzz 应用（`patch -f`
-  允许），已按 952 → 953 的顺序验证通过；如果以后 kernel bump 导致失败，按日志重修。
+- 6.18 的 SFE `hack-6.18/952`、`953` 补丁按 952 → 953 的顺序应用，允许 offset/fuzz。
+  turboacc 的 `953` 仍按旧内核写 `skbuff.h` 上下文，而 6.18 在 `unreadable:1` 后新增了
+  `tc_depth:2`，hunk #1 会失败；`core.sh` 在拷贝 turboacc 补丁后会用仓库内的
+  `sfe-patches/953-net-patch-linux-kernel-to-support-shortcut-fe-6.18.patch` 覆盖（仅 6.18，
+  6.6 的 953 结构不同）。该修正版已验证可在 linux-6.18.60 + 952 上干净应用。
 - 6.18 的 kmod 排除表先与 6.6 相同，尚未跑完整的 `ALLKMOD=1` 验证。
 - 下载阶段 `make download` 允许失败（`|| true`）：ATF 等包的 mirror-hash 校验在 CI 上会失败，
   构建时会用 git 回退取源码；同时 build matrix 关闭 fail-fast，两个 target 互不影响。

@@ -401,6 +401,18 @@ function add_openwrt_sfe_66_2512() {
 			openwrt/target/linux/generic/hack-$KERNEL_VERSION/ || exit 1
 		cp -f "$temp_dir/package/hack-$KERNEL_VERSION/953-net-patch-linux-kernel-to-support-shortcut-fe.patch" \
 			openwrt/target/linux/generic/hack-$KERNEL_VERSION/ || exit 1
+		# turboacc 的 hack-6.18/953 还是 6.18 之前的 skbuff.h 上下文：
+		# 6.18 在 unreadable:1 后新增了 tc_depth:2，hunk #1 必然失败。
+		# 6.6 的 953 结构不同，只有 6.18 用仓库里的修正版覆盖。
+		if [ "$KERNEL_VERSION" = "6.18" ]; then
+			local sfe953_fix="sfe-patches/953-net-patch-linux-kernel-to-support-shortcut-fe-6.18.patch"
+			if [ ! -s "$sfe953_fix" ]; then
+				echo "::error ::Missing SFE 953 fix: $sfe953_fix"
+				exit 1
+			fi
+			cp -f "$sfe953_fix" \
+				openwrt/target/linux/generic/hack-$KERNEL_VERSION/953-net-patch-linux-kernel-to-support-shortcut-fe.patch || exit 1
+		fi
 
 		if [[ "$Matrix_Target" == *-nftables ]]; then
 			mkdir -p "$temp_dir/luci" openwrt/package/turboacc || exit 1
