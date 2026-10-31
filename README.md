@@ -377,10 +377,16 @@ openwrt-2512-618-rk/           # 6.18 需要套在源码树上的补丁/资源
 - 6.18 工作流默认 `TEST_KERNEL=0`；6.18 分支的 `KERNEL_PATCHVER` 已经是 6.18，不要用
   6.6 的 testing kernel 逻辑。
 - 6.18 的 SFE `hack-6.18/952`、`953` 补丁按 952 → 953 的顺序应用，允许 offset/fuzz。
-  turboacc 的 `953` 仍按旧内核写 `skbuff.h` 上下文，而 6.18 在 `unreadable:1` 后新增了
-  `tc_depth:2`，hunk #1 会失败；`core.sh` 在拷贝 turboacc 补丁后会用仓库内的
-  `sfe-patches/953-net-patch-linux-kernel-to-support-shortcut-fe-6.18.patch` 覆盖（仅 6.18，
-  6.6 的 953 结构不同）。该修正版已验证可在 linux-6.18.60 + 952 上干净应用。
+  turboacc 的 `953` 是按 6.18.52 的 `skbuff.h` 上下文写的；6.18.57+ 在 `unreadable:1`
+  后新增了 `tc_depth:2`，hunk #1 会失败。`core.sh` 会读取
+  `target/linux/generic/kernel-6.18` 判断小版本：6.18.57+（当前 dev/6.18.60）用仓库内的
+  `sfe-patches/953-net-patch-linux-kernel-to-support-shortcut-fe-6.18.patch` 覆盖；
+  稳定分支 6.18.52 继续用 turboacc 原补丁（6.6 的 953 结构不同，也不会覆盖）。
+  修正版已验证可在 linux-6.18.60 + 952 上干净应用。
+- dev 分支同步 upstream 时曾丢掉 6.18 的 kernel config pin（`ARM64_BRBE`、`ARM_PMU`、
+  `DEBUG_INFO_BTF_MODULES`、`MODULE_ALLOW_BTF_MISMATCH`）。ALLKMOD 打开 `PERF_EVENTS`
+  后这些符号会以 `(NEW)` 形式阻塞 `syncconfig`；`core.sh ensure_kernel_config_618`
+  会在构建前按需补回，已存在时自动跳过。
 - 6.18 的 kmod 排除表先与 6.6 相同，尚未跑完整的 `ALLKMOD=1` 验证。
 - 下载阶段 `make download` 允许失败（`|| true`）：ATF 等包的 mirror-hash 校验在 CI 上会失败，
   构建时会用 git 回退取源码；同时 build matrix 关闭 fail-fast，两个 target 互不影响。

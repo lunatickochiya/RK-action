@@ -176,7 +176,38 @@ function init_gh_env_common() {
 	echo "The MATH Matrix_Target is: $Target_CFG_Machine"
 }
 
+# 6.18.60 + ALLKMOD 时 PERF_EVENTS/BTF 等选项会被 package override 打开，
+# 从而暴露 generic/config-6.18 里没有的新符号；CI 的 syncconfig 没有 stdin，
+# 遇到 (NEW) 直接失败。dev 分支 3da24bf 同步 upstream 时把 8ec070c 的 pin
+# 丢了，这里按需补回（稳定分支已包含，自动跳过）。
+function ensure_kernel_config_618() {
+	[ "$KERNEL_VERSION" = "6.18" ] || return 0
+	local kernel_config="openwrt/target/linux/generic/config-6.18"
+	local line sym
+	if [ ! -s "$kernel_config" ]; then
+		echo "::error ::Missing kernel config: $kernel_config"
+		return 1
+	fi
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		sym="${line#"# "}"
+		sym="${sym%%[ =]*}"
+		if grep -qE "^(# )?${sym}(=| |$)" "$kernel_config"; then
+			continue
+		fi
+		printf '%s\n' "$line" >> "$kernel_config"
+		echo "----kernel-config: add $sym----"
+	done <<'EOF'
+# CONFIG_ARM64_BRBE is not set
+CONFIG_ARM_PMU=y
+CONFIG_DEBUG_INFO_BTF_MODULES=y
+# CONFIG_MODULE_ALLOW_BTF_MISMATCH is not set
+EOF
+}
+
 function init_openwrt_patch_common() {
+	ensure_kernel_config_618 || return 1
+
 	# 启用 busybox nohup/xxd/devmem（把 Config-defaults.in 的默认值改为 y）
 	# 移植自 AP-action-IPQ 113846b（devmem 为追加）
 	local busybox_defaults="openwrt/package/utils/busybox/Config-defaults.in"
@@ -401,10 +432,16 @@ function add_openwrt_sfe_66_2512() {
 			openwrt/target/linux/generic/hack-$KERNEL_VERSION/ || exit 1
 		cp -f "$temp_dir/package/hack-$KERNEL_VERSION/953-net-patch-linux-kernel-to-support-shortcut-fe.patch" \
 			openwrt/target/linux/generic/hack-$KERNEL_VERSION/ || exit 1
-		# turboacc 的 hack-6.18/953 还是 6.18 之前的 skbuff.h 上下文：
-		# 6.18 在 unreadable:1 后新增了 tc_depth:2，hunk #1 必然失败。
-		# 6.6 的 953 结构不同，只有 6.18 用仓库里的修正版覆盖。
-		if [ "$KERNEL_VERSION" = "6.18" ]; then
+		# turboacc 的 hack-6.18/953 是按 6.18.52 的 skbuff.h 写的；6.18.57+
+		# 在 unreadable:1 后新增了 tc_depth:2，hunk #1 必然失败。
+		# 稳定分支（6.18.52）继续用 turboacc 原补丁；6.18.57+（dev/6.18.60）
+		# 用仓库里的修正版覆盖。6.6 的 953 结构不同，不处理。
+		local kernel_minor=""
+		if [ "$KERNEL_VERSION" = "6.18" ] && [ -f "openwrt/target/linux/generic/kernel-6.18" ]; then
+			kernel_minor="$(sed -n 's/^LINUX_VERSION-6\.18 = \.\([0-9][0-9]*\).*/\1/p' \
+				openwrt/target/linux/generic/kernel-6.18 | head -n 1)"
+		fi
+		if [ -n "$kernel_minor" ] && [ "$kernel_minor" -ge 57 ]; then
 			local sfe953_fix="sfe-patches/953-net-patch-linux-kernel-to-support-shortcut-fe-6.18.patch"
 			if [ ! -s "$sfe953_fix" ]; then
 				echo "::error ::Missing SFE 953 fix: $sfe953_fix"
@@ -412,6 +449,7 @@ function add_openwrt_sfe_66_2512() {
 			fi
 			cp -f "$sfe953_fix" \
 				openwrt/target/linux/generic/hack-$KERNEL_VERSION/953-net-patch-linux-kernel-to-support-shortcut-fe.patch || exit 1
+			echo "----sfe: 953 skbuff.h rebased for 6.18.$kernel_minor----"
 		fi
 
 		if [[ "$Matrix_Target" == *-nftables ]]; then
