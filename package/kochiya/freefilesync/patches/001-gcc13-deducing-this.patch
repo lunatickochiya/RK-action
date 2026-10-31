@@ -1,0 +1,31 @@
+diff --git a/FreeFileSync/Source/base/versioning.cpp b/FreeFileSync/Source/base/versioning.cpp
+index 4bbcb72..3f52701 100644
+--- a/FreeFileSync/Source/base/versioning.cpp
++++ b/FreeFileSync/Source/base/versioning.cpp
+@@ -8,6 +8,7 @@
+ #include "parallel_scan.h"
+ #include "status_handler_impl.h"
+ #include "dir_exist_async.h"
++#include <functional>
+ 
+ using namespace zen;
+ using namespace fff;
+@@ -557,7 +558,8 @@ void fff::applyVersioningLimit(const std::set<VersioningLimitFolder>& folderLimi
+     const std::wstring txtRemoving = _("Removing old file versions:") + L' ';
+     const std::wstring txtDeletingFolder = _("Deleting folder %x");
+ 
+-    auto deleteEmptyFolderTask = [&txtDeletingFolder, &protFolderItemCount](this const auto& self, const AbstractPath& folderPath, AsyncCallback& acb) -> void //throw ThreadStopRequest
++    auto deleteEmptyFolderTask = std::function<void(const AbstractPath&, AsyncCallback&)>(); //throw ThreadStopRequest
++    deleteEmptyFolderTask = [&txtDeletingFolder, &protFolderItemCount, &deleteEmptyFolderTask](const AbstractPath& folderPath, AsyncCallback& acb) -> void //throw ThreadStopRequest
+     {
+         const std::wstring errMsg = tryReportingError([&] //throw ThreadStopRequest
+         {
+@@ -571,7 +573,7 @@ void fff::applyVersioningLimit(const std::set<VersioningLimitFolder>& folderLimi
+                 bool deleteParent = false;
+                 protFolderItemCount.access([&](auto& folderItemCount2) { deleteParent = --folderItemCount2[*parentPath] == 0; });
+                 if (deleteParent) //we're done here anyway => no need to schedule parent deletion in a separate task!
+-                    self(*parentPath, acb); //throw ThreadStopRequest
++                    deleteEmptyFolderTask(*parentPath, acb); //throw ThreadStopRequest
+             }
+     };
+ 

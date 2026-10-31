@@ -1,0 +1,40 @@
+diff --git a/FreeFileSync/Source/afs/native.cpp b/FreeFileSync/Source/afs/native.cpp
+index 6cf0fdc..8cb3c2f 100644
+--- a/FreeFileSync/Source/afs/native.cpp
++++ b/FreeFileSync/Source/afs/native.cpp
+@@ -15,7 +15,6 @@
+ #include <zen/guid.h>
+ #include <zen/crc.h>
+ #include "abstract_impl.h"
+-#include "../base/icon_loader.h"
+ 
+     #include <sys/vfs.h> //statfs
+ 
+@@ -644,25 +643,8 @@ private:
+     }
+ 
+     //----------------------------------------------------------------------------------------------------------------
+-    FileIconHolder getFileIcon(const AfsPath& filePath, int pixelSize) const override //throw FileError; (optional return value)
+-    {
+-        initComForThread(); //throw FileError
+-        try
+-        {
+-            return fff::getFileIcon(getNativePath(filePath), pixelSize); //throw SysError
+-        }
+-        catch (const SysError& e) { throw FileError(replaceCpy(_("Cannot read file %x."), L"%x", fmtPath(getDisplayPath(filePath))), e.toString()); }
+-    }
+-
+-    ImageHolder getThumbnailImage(const AfsPath& filePath, int pixelSize) const override //throw FileError; (optional return value)
+-    {
+-        initComForThread(); //throw FileError
+-        try
+-        {
+-            return fff::getThumbnailImage(getNativePath(filePath), pixelSize); //throw SysError
+-        }
+-        catch (const SysError& e) { throw FileError(replaceCpy(_("Cannot read file %x."), L"%x", fmtPath(getDisplayPath(filePath))), e.toString()); }
+-    }
++    FileIconHolder getFileIcon(const AfsPath& /*filePath*/, int /*pixelSize*/) const override { return {}; }
++    ImageHolder    getThumbnailImage(const AfsPath& /*filePath*/, int /*pixelSize*/) const override { return {}; }
+ 
+     void authenticateAccess(const RequestPasswordFun& requestPassword /*throw X*/) const override //throw FileError, (X)
+     {

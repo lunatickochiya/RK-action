@@ -1,0 +1,83 @@
+# Headless build for the FreeFileSync synchronization engine.
+#
+# BUILD_DIR points to the unpacked upstream source tree; the package Makefile
+# copies src/*.cpp into $(BUILD_DIR)/headless before calling this file.
+
+CXX ?= g++
+CXXFLAGS ?=
+LDFLAGS ?=
+LIBS ?=
+
+BUILD_DIR ?= ..
+OUT_DIR ?= $(BUILD_DIR)/freefilesync-build
+
+FFS := $(BUILD_DIR)/FreeFileSync/Source
+
+SOURCES := \
+	$(FFS)/base/algorithm.cpp \
+	$(FFS)/base/binary.cpp \
+	$(FFS)/base/comparison.cpp \
+	$(FFS)/base/db_file.cpp \
+	$(FFS)/base/dir_lock.cpp \
+	$(FFS)/base/file_hierarchy.cpp \
+	$(FFS)/base/multi_rename.cpp \
+	$(FFS)/base/parallel_scan.cpp \
+	$(FFS)/base/path_filter.cpp \
+	$(FFS)/base/speed_test.cpp \
+	$(FFS)/base/structures.cpp \
+	$(FFS)/base/synchronization.cpp \
+	$(FFS)/base/versioning.cpp \
+	$(FFS)/afs/abstract.cpp \
+	$(FFS)/afs/concrete.cpp \
+	$(FFS)/afs/ftp.cpp \
+	$(FFS)/afs/gdrive.cpp \
+	$(FFS)/afs/init_curl_libssh2.cpp \
+	$(FFS)/afs/native.cpp \
+	$(FFS)/afs/sftp.cpp \
+	$(FFS)/ffs_paths.cpp \
+	$(FFS)/log_file.cpp \
+	$(FFS)/status_handler.cpp \
+	$(BUILD_DIR)/libcurl/curl_wrap.cpp \
+	$(BUILD_DIR)/zen/argon2.cpp \
+	$(BUILD_DIR)/zen/file_access.cpp \
+	$(BUILD_DIR)/zen/file_io.cpp \
+	$(BUILD_DIR)/zen/file_path.cpp \
+	$(BUILD_DIR)/zen/file_traverser.cpp \
+	$(BUILD_DIR)/zen/http.cpp \
+	$(BUILD_DIR)/zen/zstring.cpp \
+	$(BUILD_DIR)/zen/format_unit.cpp \
+	$(BUILD_DIR)/zen/legacy_compiler.cpp \
+	$(BUILD_DIR)/zen/open_ssl.cpp \
+	$(BUILD_DIR)/zen/process_priority.cpp \
+	$(BUILD_DIR)/zen/recycler.cpp \
+	$(BUILD_DIR)/zen/resolve_path.cpp \
+	$(BUILD_DIR)/zen/process_exec.cpp \
+	$(BUILD_DIR)/zen/shutdown.cpp \
+	$(BUILD_DIR)/zen/sys_error.cpp \
+	$(BUILD_DIR)/zen/sys_info.cpp \
+	$(BUILD_DIR)/zen/sys_version.cpp \
+	$(BUILD_DIR)/zen/thread.cpp \
+	$(BUILD_DIR)/zen/zlib_wrap.cpp \
+	$(BUILD_DIR)/headless/ffs_batch_config.cpp \
+	$(BUILD_DIR)/headless/ffs_console_handler.cpp \
+	$(BUILD_DIR)/headless/ffs_main.cpp
+
+OBJECTS := $(patsubst $(BUILD_DIR)/%.cpp,$(OUT_DIR)/%.o,$(SOURCES))
+DEPS    := $(OBJECTS:.o=.d)
+
+.PHONY: all clean
+
+all: $(OUT_DIR)/freefilesync
+
+$(OUT_DIR)/freefilesync: $(OBJECTS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(LDFLAGS) -o $@ $(OBJECTS) $(LIBS)
+
+$(OUT_DIR)/%.o: $(BUILD_DIR)/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
+
+clean:
+	rm -rf $(OUT_DIR)
+
+-include $(DEPS)

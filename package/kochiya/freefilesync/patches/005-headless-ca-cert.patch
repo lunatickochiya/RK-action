@@ -1,0 +1,13 @@
+diff --git a/FreeFileSync/Source/afs/concrete.cpp b/FreeFileSync/Source/afs/concrete.cpp
+index b700183..23831df 100644
+--- a/FreeFileSync/Source/afs/concrete.cpp
++++ b/FreeFileSync/Source/afs/concrete.cpp
+@@ -19,7 +19,7 @@ void fff::initAfs(const AfsConfig& cfg)
+     ftpInit();
+     sftpInit();
+     gdriveInit(appendPath(cfg.configDirPath,   Zstr("GoogleDrive")),
+-               appendPath(cfg.resourceDirPath, Zstr("cacert.pem")));
++               cfg.resourceDirPath.empty() ? Zstring() : appendPath(cfg.resourceDirPath, Zstr("cacert.pem")));
+ }
+ 
+ 
