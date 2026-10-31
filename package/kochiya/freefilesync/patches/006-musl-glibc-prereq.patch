@@ -1,0 +1,14 @@
+--- a/zen/guid.h
++++ b/zen/guid.h
+@@ -10,6 +10,11 @@
+     #include <zen/sys_error.h>
+     //#include <uuid/uuid.h> -> uuid_generate(), uuid_unparse(); avoid additional dependency for "sudo apt-get install uuid-dev"
+ 
++// musl does not define __GLIBC_PREREQ; fall back to /dev/urandom below.
++#ifndef __GLIBC_PREREQ
++#define __GLIBC_PREREQ(maj, min) 0
++#endif
++
+ namespace zen
+ {
+ inline
