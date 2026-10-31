@@ -672,8 +672,8 @@ function fix_lunatic7_syncthing() {
 		rm -f "$d/root/etc/config/syncthing"
 		echo "Removed duplicate /etc/config/syncthing from luci-app-syncthing"
 	fi
-	if grep -Fq 'define Package/$(PKG_NAME)/conffiles' "$d/Makefile" 2>/dev/null; then
-		sed -i '/define Package\/\$(PKG_NAME)\/conffiles/,/^endef$/d' "$d/Makefile"
+	if grep -q '^define Package/.*/conffiles$' "$d/Makefile" 2>/dev/null; then
+		sed -i '/^define Package\/.*\/conffiles$/,/^endef$/d' "$d/Makefile"
 		echo "Removed luci-app-syncthing conffiles block"
 	fi
 }
