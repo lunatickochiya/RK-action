@@ -109,6 +109,12 @@ function action_log()
 
 	local log_name = name:gsub("%.ffs_batch$", "")
 	local path = log_dir() .. "/" .. log_name .. ".log"
+	if not fs.access(path) then
+		local alt = log_dir() .. "/" .. name .. ".log"
+		if fs.access(alt) then
+			path = alt
+		end
+	end
 	local output = luci.sys.exec("tail -n 500 " .. luci.util.shellquote(path) .. " 2>/dev/null")
 
 	luci.http.prepare_content("text/plain; charset=utf-8")
