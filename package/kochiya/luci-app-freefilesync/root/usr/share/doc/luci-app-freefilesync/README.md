@@ -83,3 +83,4 @@ CONFIG_PACKAGE_luci-app-freefilesync=y
 - SFTP 请使用 keyfile；无交互密码输入
 - 邮件通知、`PostSyncAction` 的 sleep/shutdown 不会执行
 - 作业名限制为字母、数字、`.`、`-`、`_`，避免 cron/shell 转义问题
+- 在“设置”里删除定时作业条目不会删除 `/etc/freefilesync/jobs` 下的文件
