@@ -87,7 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
-    name: Build ${{ needs.prepare.outputs.machine }} openwrt 25.12 (Linux 6.18) ${{ matrix.target }}
+    name: Build ${{ needs.prepare.outputs.machine }} openwrt 25.12 (Linux 6.18) ${{ matrix.target }}${{ github.event.inputs.patch_dir == 'openwrt-2512-618-rk-dev' && ' [dev]' || '' }}
     env:
       Matrix_Target: ${{ matrix.target }}
       Target_CFG_Machine: ${{ needs.prepare.outputs.machine }}
