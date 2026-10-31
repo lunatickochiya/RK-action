@@ -7,10 +7,10 @@
 
 # 本仓库是 rockchip 25.12 构建仓库，按 OpenWrt_PATCH_FILE_DIR 选择内核画像：
 #   openwrt-2512-rk     -> Linux 6.6（源码分支 openwrt-25.12-6.6-rk，KERNEL_TESTING_PATCHVER）
-#   openwrt-2512-618-rk -> Linux 6.18（源码分支 openwrt-25.12-6.18-rk，KERNEL_PATCHVER 默认）
+#   openwrt-2512-618-rk / -dev -> Linux 6.18（源码分支 openwrt-25.12-6.18-rk[-dev]，KERNEL_PATCHVER 默认）
 OpenWrt_PATCH_FILE_DIR="${OpenWrt_PATCH_FILE_DIR:-openwrt-2512-rk}"
 case "$OpenWrt_PATCH_FILE_DIR" in
-openwrt-2512-618-rk)
+openwrt-2512-618-rk|openwrt-2512-618-rk-dev)
 	KERNEL_VERSION=6.18
 	KERNEL_BBR_PATCH_DIR=mypatch-core-618
 	KMOD_EXCLUDE_LIST=package-configs/kmod_exclude_list_kernel618.config
