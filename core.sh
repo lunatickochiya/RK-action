@@ -598,6 +598,7 @@ function fix_openwrt_feeds() {
 	remove_error_package_not_install
 	patch_openwrt_feeds
 	fix_containerd_linkname
+	fix_lunatic7_xray_version
 	patch_lunatic7
 	fix_lunatic7_syncthing
 
@@ -725,6 +726,22 @@ function fix_lunatic7_syncthing() {
 	if grep -q '^define Package/.*/conffiles$' "$d/Makefile" 2>/dev/null; then
 		sed -i '/^define Package\/.*\/conffiles$/,/^endef$/d' "$d/Makefile"
 		echo "Removed luci-app-syncthing conffiles block"
+	fi
+}
+
+function fix_lunatic7_xray_version() {
+	# luna-action-packages 2026-10-30 的自动同步把 xray-core 写成 26.10.29，
+	# 但 XTLS/Xray-core 没有 v26.10.29 这个 tag（相邻版本是 26.10.21/26.10.31），
+	# codeload 返回 404，导致 xray-core 下载/编译失败。只在仍是该坏版本时修正，
+	# 等 feed 自行更新后此函数自动失效。
+	local f=feeds/lunatic7/xray-core/Makefile
+	[ -f "$f" ] || return 0
+	if grep -q '^PKG_VERSION:=26\.10\.29$' "$f"; then
+		sed -i \
+			-e 's/^PKG_VERSION:=26\.10\.29$/PKG_VERSION:=26.10.31/' \
+			-e 's/^PKG_HASH:=.*/PKG_HASH:=be44f95d497ad4ba6e9d1dcfbbd71e8e51f812aff077d4c15c9947eff5e3046a/' \
+			"$f"
+		echo "xray-core: fixed nonexistent 26.10.29 tag -> 26.10.31"
 	fi
 }
 
