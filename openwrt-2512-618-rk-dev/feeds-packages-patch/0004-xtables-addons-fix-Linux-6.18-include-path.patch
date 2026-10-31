@@ -1,0 +1,28 @@
+From c82c8c5e5d78e984f9b3b29c205d4d2ed0ef3b80 Mon Sep 17 00:00:00 2001
+From: lunatickochiya <125438787@qq.com>
+Date: Mon, 28 Sep 2026 17:29:19 +0800
+Subject: [PATCH 04/10] xtables-addons: fix Linux 6.18 include path
+
+---
+ .../patches/501-kernel-6.18-include-path.patch           | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+ create mode 100644 net/xtables-addons/patches/501-kernel-6.18-include-path.patch
+
+diff --git a/net/xtables-addons/patches/501-kernel-6.18-include-path.patch b/net/xtables-addons/patches/501-kernel-6.18-include-path.patch
+new file mode 100644
+index 0000000..ddc4083
+--- /dev/null
++++ b/net/xtables-addons/patches/501-kernel-6.18-include-path.patch
+@@ -0,0 +1,9 @@
++--- a/extensions/Kbuild
+++++ b/extensions/Kbuild
++@@ -1,4 +1,5 @@
++ # -*- Makefile -*-
++-
+++subdir-ccflags-y += -I$(src)
+++
++ include ${XA_ABSTOPSRCDIR}/mconfig
++ -include ${XA_ABSTOPSRCDIR}/mconfig.*
+-- 
+2.55.0
+

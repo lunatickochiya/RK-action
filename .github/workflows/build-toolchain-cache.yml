@@ -26,6 +26,7 @@ on:
         type: choice
         options:
         - 'openwrt-2512-618-rk'
+        - 'openwrt-2512-618-rk-dev'
         - 'openwrt-2512-rk'
       machine:
         description: '用哪个机型生成 .config（同 target 的机型工具链相同）'

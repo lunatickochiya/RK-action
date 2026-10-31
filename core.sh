@@ -549,6 +549,7 @@ function fix_openwrt_feeds() {
 	patch_openwrt_feeds
 	fix_containerd_linkname
 	patch_lunatic7
+	fix_lunatic7_syncthing
 
 	cd ../
 	add_machine_package_config
@@ -658,6 +659,22 @@ function fix_containerd_linkname() {
 	elif ! grep -q 'checklinkname=0' "$f"; then
 		awk '{print} /^Build\/Compile=/ {print "MAKE_FLAGS += EXTRA_LDFLAGS=\"-s -w -checklinkname=0\""}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
 		echo "containerd: -checklinkname=0 injected=$(grep -c 'checklinkname=0' "$f")"
+	fi
+}
+
+function fix_lunatic7_syncthing() {
+	# luci-app-syncthing 和 syncthing 包都安装 /etc/config/syncthing，
+	# 同时选中会在 package/install 阶段报 “trying to overwrite ...”。
+	# syncthing 包的配置更完整，保留它；去掉 LuCI 端的副本和 conffiles 声明。
+	local d="feeds/lunatic7/luci-app-syncthing"
+	[ -d "$d" ] || return 0
+	if [ -f "$d/root/etc/config/syncthing" ]; then
+		rm -f "$d/root/etc/config/syncthing"
+		echo "Removed duplicate /etc/config/syncthing from luci-app-syncthing"
+	fi
+	if grep -Fq 'define Package/$(PKG_NAME)/conffiles' "$d/Makefile" 2>/dev/null; then
+		sed -i '/define Package\/\$(PKG_NAME)\/conffiles/,/^endef$/d' "$d/Makefile"
+		echo "Removed luci-app-syncthing conffiles block"
 	fi
 }
 

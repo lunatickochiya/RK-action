@@ -1,0 +1,29 @@
+--- a/package/rockchip/ffmpeg-mpp/Makefile
++++ b/package/rockchip/ffmpeg-mpp/Makefile
+@@ -12,6 +12,9 @@
+ PKG_VERSION:=7.1~20261004
+ PKG_RELEASE:=1
+ 
++# FFmpeg 有 2000+ 个对象文件，默认 -j1 串行编译是构建时间大头。
++PKG_BUILD_PARALLEL:=1
++
+ PKG_SOURCE_DATE:=2026-10-04
+ PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+ PKG_SOURCE_VERSION:=a63922000b871c4704fe3391930fc73dfd030677
+@@ -129,6 +132,7 @@
+ 	./configure \
+ 	--enable-cross-compile \
+ 	--cross-prefix="$(TARGET_CROSS)" \
++	--cc="$(strip $(TARGET_CC))" \
+ 	--arch="$(ARCH)" \
+ 	$(if $(REAL_CPU_TYPE),--cpu=$(call qstrip,$(REAL_CPU_TYPE)),) \
+ 	--target-os=linux \
+@@ -238,7 +242,7 @@
+ endef
+ 
+ define Build/Compile
+-	$(MAKE) -C $(PKG_BUILD_DIR) \
++	+$(MAKE) $(PKG_JOBS) -C $(PKG_BUILD_DIR) \
+ 		DESTDIR="$(PKG_INSTALL_DIR)" \
+ 		all install
+ endef

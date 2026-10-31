@@ -29,6 +29,14 @@ on:
         - 'fmx1_pro'
         - 'shimeta_aiot3588a'
         - 'shimeta_aiot3588a_lite'
+      patch_dir:
+        description: '构建通道：stable 或 dev（dev 使用 openwrt-25.12-6.18-rk-dev 分支）'
+        required: true
+        default: 'openwrt-2512-618-rk'
+        type: choice
+        options:
+        - 'openwrt-2512-618-rk'
+        - 'openwrt-2512-618-rk-dev'
       SETIP:
         description: 'Set LAN IP address'
         default: '192.168.6.1'
@@ -75,7 +83,8 @@ on:
 
 env:
   TZ: Asia/Shanghai
-  OpenWrt_PATCH_FILE_DIR: openwrt-2512-618-rk
+  OpenWrt_PATCH_FILE_DIR: ${{ github.event.inputs.patch_dir || 'openwrt-2512-618-rk' }}
+  DEV_SUFFIX: ${{ github.event.inputs.patch_dir == 'openwrt-2512-618-rk-dev' && '_dev' || '' }}
   KERNEL66_REPO_TOKEN: ${{ secrets.MY_SECRET_TOKEN }}
 
 jobs:
@@ -101,7 +110,7 @@ jobs:
     timeout-minutes: 330
     name: Toolchain（合并流程）
     env:
-      OpenWrt_PATCH_FILE_DIR: openwrt-2512-618-rk
+      OpenWrt_PATCH_FILE_DIR: ${{ github.event.inputs.patch_dir || 'openwrt-2512-618-rk' }}
       Matrix_Target: rockchip-nftables
       Target_CFG_Machine: ${{ github.event.inputs.MACH }}
       SFE_INPUT_STATUS: 'false'
@@ -335,7 +344,7 @@ jobs:
     env:
       Matrix_Target: ${{ matrix.target }}
       Target_CFG_Machine: ${{ needs.prepare.outputs.machine }}
-      OpenWrt_PATCH_FILE_DIR: openwrt-2512-618-rk
+      OpenWrt_PATCH_FILE_DIR: ${{ github.event.inputs.patch_dir || 'openwrt-2512-618-rk' }}
       SFE_INPUT_STATUS: ${{ github.event.inputs.SFE_BUILDIN || 'true' }}
 
     steps:
@@ -785,7 +794,7 @@ jobs:
       continue-on-error: true
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
-        name: ${{ env.date3 }}_${{matrix.target}}_openwrt-25.12-6.18
+        name: ${{ env.date3 }}_${{matrix.target}}_openwrt-25.12-6.18${{ env.DEV_SUFFIX }}
         path: |
           openwrt/bin/
 
@@ -822,7 +831,7 @@ jobs:
       continue-on-error: true
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true'
       with:
-        name: ${{ env.date3 }}_${{matrix.target}}_firmware_openwrt-25.12-6.18-${{ needs.prepare.outputs.machine }}-${{ github.event.inputs.SETIP }}${{ env.Kernel_Test }}${{ env.BCM_FULLCONE_NAME }}${{ env.SFE }}${{ env.TRY_BBR_V3_NAME }}${{ env.eBPF }}
+        name: ${{ env.date3 }}_${{matrix.target}}_firmware_openwrt-25.12-6.18-${{ needs.prepare.outputs.machine }}${{ env.DEV_SUFFIX }}-${{ github.event.inputs.SETIP }}${{ env.Kernel_Test }}${{ env.BCM_FULLCONE_NAME }}${{ env.SFE }}${{ env.TRY_BBR_V3_NAME }}${{ env.eBPF }}
         path: |
           firmware
 
@@ -831,7 +840,7 @@ jobs:
       continue-on-error: true
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_IPK_DIR == 'true' && steps.afb.outputs.status == 'success'
       with:
-        name: ${{ env.date3 }}_${{matrix.target}}_ipks_openwrt-25.12-6.18-${{ needs.prepare.outputs.machine }}${{ env.Kernel_Test }}${{ env.BCM_FULLCONE_NAME }}${{ env.SFE }}${{ env.TRY_BBR_V3_NAME }}${{ env.eBPF }}
+        name: ${{ env.date3 }}_${{matrix.target}}_ipks_openwrt-25.12-6.18-${{ needs.prepare.outputs.machine }}${{ env.DEV_SUFFIX }}${{ env.Kernel_Test }}${{ env.BCM_FULLCONE_NAME }}${{ env.SFE }}${{ env.TRY_BBR_V3_NAME }}${{ env.eBPF }}
         path: |
           ipks
 
@@ -872,8 +881,8 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         files: "${{ env.FIRMWARE }}/*"
-        name: ${{ env.date }} ${{matrix.target}}-${{ needs.prepare.outputs.machine }}-openwrt-25.12-6.18
-        tag_name: ${{ env.date }}_${{matrix.target}}-${{ needs.prepare.outputs.machine }}-openwrt-25.12-6.18
+        name: ${{ env.date }} ${{matrix.target}}-${{ needs.prepare.outputs.machine }}-openwrt-25.12-6.18${{ env.DEV_SUFFIX }}
+        tag_name: ${{ env.date }}_${{matrix.target}}-${{ needs.prepare.outputs.machine }}-openwrt-25.12-6.18${{ env.DEV_SUFFIX }}
         body_path: release.txt
 
     - name: 删除工作流

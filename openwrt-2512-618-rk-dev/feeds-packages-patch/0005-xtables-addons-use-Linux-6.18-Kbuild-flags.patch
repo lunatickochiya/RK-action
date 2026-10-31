@@ -1,0 +1,26 @@
+From d95dadfbf664c980bf50c6f6a64aa89e19ff0a82 Mon Sep 17 00:00:00 2001
+From: lunatickochiya <125438787@qq.com>
+Date: Mon, 28 Sep 2026 17:32:04 +0800
+Subject: [PATCH 05/10] xtables-addons: use Linux 6.18 Kbuild flags
+
+---
+ .../patches/502-kernel-6.18-kbuild-flags.patch             | 7 +++++++
+ 1 file changed, 7 insertions(+)
+ create mode 100644 net/xtables-addons/patches/502-kernel-6.18-kbuild-flags.patch
+
+diff --git a/net/xtables-addons/patches/502-kernel-6.18-kbuild-flags.patch b/net/xtables-addons/patches/502-kernel-6.18-kbuild-flags.patch
+new file mode 100644
+index 0000000..895108b
+--- /dev/null
++++ b/net/xtables-addons/patches/502-kernel-6.18-kbuild-flags.patch
+@@ -0,0 +1,7 @@
++--- a/extensions/LUA/Kbuild
+++++ b/extensions/LUA/Kbuild
++@@ -51,0 +52,4 @@
+++ccflags-y += -DDEBUG
+++ccflags-y += -I$(src)/prot_buf_new
+++ccflags-y += -isystem $(shell $(CC) -print-file-name=include)
+++ccflags-y += -I$(src)/lua -I$(src)/lua/include
+-- 
+2.55.0
+

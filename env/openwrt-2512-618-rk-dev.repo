@@ -1,0 +1,8 @@
+# OpenWrt 25.12 + Linux 6.18 rockchip dev tree（新功能/新内核测试） (private fork, needs MY_SECRET_TOKEN in CI)
+REPO_URL="https://${KERNEL66_REPO_TOKEN}@github.com/lunatickochiya/openwrt-ipq-2410.git"
+REPO_BRANCH="openwrt-25.12-6.18-rk-dev"
+KERNEL66_REPO_URL="https://${KERNEL66_REPO_TOKEN}@github.com/lunatickochiya/openwrt-ipq-2410.git"
+KERNEL66_REPO_BRANCH="openwrt-25.12-6.18-rk-dev"
+DIY_SH="diy-2512-rk.sh"
+DIY_SH_AFB="after_build.sh"
+DIY_SH_RFC="refineconfig.sh"

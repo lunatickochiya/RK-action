@@ -35,6 +35,35 @@
 在 Actions 页面按需选择 `Build Rockchip 25.12` 或 `Build Rockchip 25.12 (Linux 6.18)`，
 点击 `Run workflow`，再选择机型与构建参数。
 
+### dev 测试通道（6.18）
+
+`build-rockchip-2512-618.yml`、combo 工作流和 `build-toolchain-cache.yml` 新增
+`patch_dir` 选项：
+
+- `openwrt-2512-618-rk`：稳定通道（默认）；
+- `openwrt-2512-618-rk-dev`：dev 测试通道。
+
+选 dev 时：
+
+- 源码分支切到 `openwrt-25.12-6.18-rk-dev`（见 `env/openwrt-2512-618-rk-dev.repo`）；
+- 配置/补丁使用 `machine-configs/openwrt-2512-618-rk-dev/`、
+  `package-configs/openwrt-2512-618-rk-dev/`、`openwrt-2512-618-rk-dev/`；
+- 产物名和 Release tag 自动加 `_dev` 后缀，避免和稳定版混淆；
+- 工具链缓存按 dev 画像单独一份，不会污染稳定缓存。
+
+新增功能/升级内核的测试流程：
+
+1. 在 `openwrt-25.12-6.18-rk-dev` 分支提交 DTS/U-Boot/内核改动；
+2. 新机型：编辑 `machine-configs/openwrt-2512-618-rk-dev/` 与
+   `package-configs/openwrt-2512-618-rk-dev/`；
+3. 新补丁：放 `openwrt-2512-618-rk-dev/mypatch-core/`；
+4. 触发 6.18 工作流并选择 `patch_dir=openwrt-2512-618-rk-dev`；
+   仅测试不发布时把 `config_repo` 里的 `UPLOAD_RELEASE` 设为 `"0"`。
+
+> `luci-app-syncthing` 与 `syncthing` 都会安装 `/etc/config/syncthing`。构建时
+> `core.sh fix_lunatic7_syncthing` 会自动删除 LuCI 端的副本和 conffiles 声明，
+> 保留 `syncthing` 包的完整配置，避免 package/install 的 overwrite 报错。
+
 ## 缓存（tools / toolchain / ccache）
 
 工具链不再按机型各存一份，而是由独立的 `build-toolchain-cache.yml` 预编译：
