@@ -63,10 +63,9 @@
 > `luci-app-syncthing` 与 `syncthing` 都会安装 `/etc/config/syncthing`。构建时
 > `core.sh fix_lunatic7_syncthing` 会自动删除 LuCI 端的副本和 conffiles 声明，
 > 保留 `syncthing` 包的完整配置，避免 package/install 的 overwrite 报错。
-> `openwrt-25.12-6.18-rk-dev` 当前升级到 Linux 6.18.60，内核 TCP/MPTCP 代码有变化，
-> `mypatch-bbr-v3` 里的 `951-net-tcp-bbr3-support.patch` 还没 rebase。
-> dev 通道会自动跳过 `TRY_BBR_V3`（稳定 6.18.56 和 6.6 不受影响），
-> 等该补丁适配 6.18.60 后移除 `core.sh` 里的 guard 即可。
+> `openwrt-25.12-6.18-rk-dev` 已升级到 Linux 6.18.60，`mypatch-bbr-v3` 的
+> BBR v3 补丁已按 6.18.60 重新生成；dev 通道可以正常使用 `TRY_BBR_V3=1`。
+> 稳定通道继续使用 6.18.56 的旧补丁，两者互不影响。
 
 ## 缓存（tools / toolchain / ccache）
 

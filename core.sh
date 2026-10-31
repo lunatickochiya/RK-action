@@ -201,14 +201,6 @@ function init_openwrt_patch_common() {
 		echo "----$Matrix_Target----sdk-base-feed-cleared---"
 	fi
 
-	if [ "$TRY_BBR_V3" = "1" ] && [ "$OpenWrt_PATCH_FILE_DIR" = "openwrt-2512-618-rk-dev" ]; then
-		# 6.18.60 的 TCP/MPTCP 代码有变化，当前 BBR v3 补丁（951-net-tcp-bbr3-support.patch）
-		# 还没 rebase，强行打会 Patch failed。dev 通道先跳过，保证新内核能编过；
-		# 稳定通道和 6.6 不受影响。
-		echo "::warning ::openwrt-25.12-6.18-rk-dev 的 BBR v3 补丁尚未适配 6.18.60，本次 dev 构建跳过 TRY_BBR_V3"
-		TRY_BBR_V3=0
-	fi
-
 	if [ "$TRY_BBR_V3" = "1" ]; then
 		# BBR v3 的内核补丁按内核版本分开：6.6 在 mypatch-core-66，
 		# 6.18 在 mypatch-core-618；构建时拷进 mypatch-core 一起打。
