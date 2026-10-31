@@ -1,0 +1,101 @@
+#!/bin/sh
+#
+# Run one FreeFileSync .ffs_batch job with a per-job lock and a text log.
+# Used by the generated cron entries and by the LuCI "Run now" button.
+#
+# Usage: freefilesync-run <job-name|job.ffs_batch>
+#
+
+. /lib/functions.sh
+
+name="$1"
+[ -n "$name" ] || {
+	echo "usage: $0 <job-name|job.ffs_batch>" >&2
+	exit 2
+}
+
+config_load freefilesync
+config_get job_dir  main job_dir  /etc/freefilesync/jobs
+config_get log_dir  main log_dir  /var/log/freefilesync
+config_get log_format main log_format text
+
+job_cfg=""
+job_name=""
+
+find_job_section() {
+	local section="$1"
+	local n
+
+	config_get n "$section" name
+	[ -n "$n" ] || n="$section"
+	[ "$n" = "$name" ] || return 0
+
+	config_get job_cfg "$section" config
+	job_name="$n"
+}
+
+config_foreach find_job_section job
+
+if [ -z "$job_cfg" ] && [ -f "$name" ]; then
+	job_cfg="$name"
+fi
+
+if [ -z "$job_cfg" ]; then
+	for candidate in "$job_dir/$name" "$job_dir/$name.ffs_batch"; do
+		if [ -f "$candidate" ]; then
+			job_cfg="$candidate"
+			break
+		fi
+	done
+fi
+
+if [ -z "$job_name" ]; then
+	job_name="${name##*/}"
+	job_name="${job_name%.ffs_batch}"
+fi
+
+case "$job_name" in
+	""|*/*|*..*)
+		echo "invalid job name: $job_name" >&2
+		exit 2
+		;;
+esac
+
+if [ -z "$job_cfg" ] || [ ! -f "$job_cfg" ]; then
+	echo "job file not found: $name" >&2
+	exit 2
+fi
+
+if [ ! -x /usr/bin/freefilesync ]; then
+	echo "freefilesync binary is missing" >&2
+	exit 127
+fi
+
+[ "$log_format" = "html" ] || log_format="text"
+
+mkdir -p "$log_dir" 2>/dev/null
+mkdir -p /var/lock 2>/dev/null
+log_file="$log_dir/$job_name.log"
+lock_dir="/var/lock/freefilesync-$job_name.lock"
+
+if ! mkdir "$lock_dir" 2>/dev/null; then
+	echo "job already running: $job_name" >> "$log_file"
+	exit 0
+fi
+
+cleanup() {
+	rmdir "$lock_dir" 2>/dev/null
+}
+trap cleanup EXIT
+trap 'exit 1' INT TERM HUP
+
+{
+	echo
+	echo "===== $(date '+%Y-%m-%d %H:%M:%S') $job_name ====="
+} >> "$log_file"
+
+/usr/bin/freefilesync -c "$job_cfg" --log-dir "$log_dir" --log-format "$log_format" >> "$log_file" 2>&1
+rc=$?
+
+echo "===== $(date '+%Y-%m-%d %H:%M:%S') exit $rc =====" >> "$log_file"
+exit $rc

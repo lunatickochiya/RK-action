@@ -1,0 +1,28 @@
+#!/bin/sh /etc/rc.common
+
+START=95
+STOP=10
+
+EXTRA_COMMANDS="status"
+EXTRA_HELP="	status	Show generated FreeFileSync cron entries"
+
+start() {
+	. /lib/functions.sh
+	config_load freefilesync
+	config_get job_dir main job_dir /etc/freefilesync/jobs
+	config_get log_dir main log_dir /var/log/freefilesync
+	mkdir -p "$job_dir" "$log_dir"
+	/usr/sbin/freefilesync-cron update
+}
+
+stop() {
+	/usr/sbin/freefilesync-cron clear
+}
+
+reload() {
+	/usr/sbin/freefilesync-cron update
+}
+
+status() {
+	/usr/sbin/freefilesync-cron status
+}

@@ -1,0 +1,130 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: luci-app-freefilesync\n"
+"PO-Revision-Date: 2026-10-31 00:00+0800\n"
+"Last-Translator: lunatickochiya\n"
+"Language-Team: Chinese (Simplified)\n"
+"Language: zh_Hans\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "FreeFileSync"
+msgstr "FreeFileSync"
+
+msgid "Jobs"
+msgstr "作业"
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "Upload a batch job"
+msgstr "上传批量作业"
+
+msgid "Job file"
+msgstr "作业文件"
+
+msgid "Select a .ffs_batch file created by FreeFileSync on your PC."
+msgstr "选择在电脑上用 FreeFileSync 生成的 .ffs_batch 文件。"
+
+msgid "Save as"
+msgstr "保存为"
+
+msgid "Letters, digits, dot, dash and underscore only. The file is stored in the job directory."
+msgstr "只允许字母、数字、点、短横线和下划线。文件保存在作业目录中。"
+
+msgid "Upload"
+msgstr "上传"
+
+msgid "No .ffs_batch files found. Upload one above or copy it to"
+msgstr "没有找到 .ffs_batch 文件。请在上方上传，或复制到"
+
+msgid "Job"
+msgstr "作业"
+
+msgid "Size"
+msgstr "大小"
+
+msgid "Modified"
+msgstr "修改时间"
+
+msgid "Schedule"
+msgstr "计划"
+
+msgid "Actions"
+msgstr "操作"
+
+msgid "Enabled"
+msgstr "启用"
+
+msgid "Disabled"
+msgstr "禁用"
+
+msgid "Manual only"
+msgstr "仅手动"
+
+msgid "Run now"
+msgstr "立即运行"
+
+msgid "Log"
+msgstr "日志"
+
+msgid "Download"
+msgstr "下载"
+
+msgid "Scheduler"
+msgstr "调度器"
+
+msgid "Enable scheduler"
+msgstr "启用调度器"
+
+msgid "When disabled, the generated cron block is removed; manual runs are still possible."
+msgstr "关闭后会移除生成的 cron 块；仍可手动运行作业。"
+
+msgid "Job directory"
+msgstr "作业目录"
+
+msgid "Log directory"
+msgstr "日志目录"
+
+msgid "Both the LuCI run log and the FreeFileSync log file are written here."
+msgstr "LuCI 运行日志和 FreeFileSync 日志都写入此目录。"
+
+msgid "FreeFileSync log format"
+msgstr "FreeFileSync 日志格式"
+
+msgid "Text"
+msgstr "文本"
+
+msgid "HTML"
+msgstr "HTML"
+
+msgid "Scheduled jobs"
+msgstr "定时作业"
+
+msgid "Each entry refers to a .ffs_batch file. Job names are used for the lock and log file; use letters, digits, dot, dash or underscore."
+msgstr "每一项对应一个 .ffs_batch 文件。作业名用于锁文件和日志文件，只允许字母、数字、点、短横线和下划线。"
+
+msgid "Job name"
+msgstr "作业名"
+
+msgid "Cron schedule"
+msgstr "Cron 计划"
+
+msgid "Five cron fields: minute hour day month weekday. Leave empty to keep the job manual-only."
+msgstr "五个 cron 字段：分 时 日 月 周。留空则只能手动运行。"
+
+msgid "Expected five cron fields, e.g. 30 3 * * *."
+msgstr "需要五个 cron 字段，例如 30 3 * * *。"
+
+msgid "Unsupported characters in cron schedule."
+msgstr "Cron 计划中包含不支持的字符。"
+
+msgid "An absolute path ending in .ffs_batch is required."
+msgstr "需要以 .ffs_batch 结尾的绝对路径。"
+
+msgid "Use letters, digits, dot, dash or underscore."
+msgstr "请使用字母、数字、点、短横线或下划线。"
+
+msgid "Schedule FreeFileSync .ffs_batch jobs and control them from LuCI."
+msgstr "在 LuCI 中管理 FreeFileSync .ffs_batch 作业、计划和运行日志。"

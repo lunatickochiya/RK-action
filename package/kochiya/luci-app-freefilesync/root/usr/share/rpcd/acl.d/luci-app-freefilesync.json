@@ -1,0 +1,21 @@
+{
+	"luci-app-freefilesync": {
+		"description": "Grant access to FreeFileSync job management",
+		"read": {
+			"uci": [ "freefilesync" ],
+			"file": {
+				"/etc/freefilesync/*": [ "read" ],
+				"/var/log/freefilesync/*": [ "read" ],
+				"/etc/crontabs/root": [ "read" ]
+			}
+		},
+		"write": {
+			"uci": [ "freefilesync" ],
+			"file": {
+				"/etc/freefilesync/*": [ "write" ],
+				"/var/log/freefilesync/*": [ "write" ],
+				"/etc/crontabs/root": [ "write" ]
+			}
+		}
+	}
+}

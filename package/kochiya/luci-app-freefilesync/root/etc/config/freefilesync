@@ -1,0 +1,5 @@
+config freefilesync 'main'
+	option enabled '1'
+	option job_dir '/etc/freefilesync/jobs'
+	option log_dir '/var/log/freefilesync'
+	option log_format 'text'

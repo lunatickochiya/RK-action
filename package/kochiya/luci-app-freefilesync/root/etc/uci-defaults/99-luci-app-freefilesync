@@ -1,0 +1,17 @@
+#!/bin/sh
+
+if ! uci -q get freefilesync.main >/dev/null; then
+	uci -q batch <<-EOF
+		set freefilesync.main=freefilesync
+		set freefilesync.main.enabled='1'
+		set freefilesync.main.job_dir='/etc/freefilesync/jobs'
+		set freefilesync.main.log_dir='/var/log/freefilesync'
+		set freefilesync.main.log_format='text'
+		commit freefilesync
+	EOF
+fi
+
+mkdir -p /etc/freefilesync/jobs /var/log/freefilesync
+[ -x /etc/init.d/freefilesync ] && /etc/init.d/freefilesync reload
+
+exit 0

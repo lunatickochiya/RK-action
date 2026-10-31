@@ -38,10 +38,12 @@ freefilesync --compare-only /etc/freefilesync/jobs/backup.ffs_batch
 
 ```sh
 CONFIG_PACKAGE_freefilesync=y
+CONFIG_PACKAGE_luci-app-freefilesync=y
 ```
 
-然后重新生成配置并编译。依赖会通过 `DEPENDS` 自动选中
-`libcurl`、`libssh2`、`libopenssl`、`libidn2`、`glib2`、`ca-bundle` 等。
+`luci-app-freefilesync` 提供上传作业、cron 计划、立即运行和日志查看页面。
+依赖会通过 `DEPENDS` 自动选中 `libcurl`、`libssh2`、`libopenssl`、`libidn2`、
+`glib2`、`ca-bundle` 等。
 
 ## 生成 `.ffs_batch`
 

@@ -1,0 +1,113 @@
+<%+header%>
+
+<h2 name="content"><%:FreeFileSync%></h2>
+
+<div class="cbi-section">
+	<h3><%:Upload a batch job%></h3>
+	<form method="post" action="<%=url([[admin]], [[services]], [[freefilesync]], [[upload]])%>" enctype="multipart/form-data">
+		<input type="hidden" name="token" value="<%=token%>" />
+		<div class="cbi-value">
+			<label class="cbi-value-title" for="jobfile"><%:Job file%></label>
+			<div class="cbi-value-field">
+				<input type="file" id="jobfile" name="jobfile" required="required" />
+				<div class="cbi-value-description"><%:Select a .ffs_batch file created by FreeFileSync on your PC.%></div>
+			</div>
+		</div>
+		<div class="cbi-value">
+			<label class="cbi-value-title" for="filename"><%:Save as%></label>
+			<div class="cbi-value-field">
+				<input type="text" id="filename" name="filename" placeholder="backup.ffs_batch" required="required" />
+				<div class="cbi-value-description"><%:Letters, digits, dot, dash and underscore only. The file is stored in the job directory.%></div>
+			</div>
+		</div>
+		<div class="cbi-value">
+			<div class="cbi-value-field">
+				<button type="submit" class="cbi-button cbi-button-apply"><%:Upload%></button>
+				<a class="cbi-button" href="<%=url([[admin]], [[services]], [[freefilesync]], [[settings]])%>"><%:Settings%></a>
+			</div>
+		</div>
+	</form>
+</div>
+
+<%
+	local fs = require "nixio.fs"
+	local uci = require "luci.model.uci"
+	local c = uci.cursor()
+	local job_dir = c:get("freefilesync", "main", "job_dir") or "/etc/freefilesync/jobs"
+	local jobs = {}
+
+	if fs.stat(job_dir, "type") == "dir" then
+		for name in fs.dir(job_dir) do
+			if name:match("%.ffs_batch$") then
+				local st = fs.stat(job_dir .. "/" .. name)
+				jobs[#jobs + 1] = {
+					file = name,
+					size = st and st.size or 0,
+					mtime = st and st.mtime or 0,
+				}
+			end
+		end
+	end
+
+	table.sort(jobs, function(a, b) return a.file < b.file end)
+%>
+
+<div class="cbi-section">
+	<h3><%:Jobs%></h3>
+	<% if #jobs == 0 then %>
+		<p><%:No .ffs_batch files found. Upload one above or copy it to%> <code><%=pcdata(job_dir)%></code>.</p>
+	<% else %>
+		<div class="table">
+			<table class="cbi-section-table">
+				<thead>
+					<tr class="cbi-section-table-titles">
+						<th class="cbi-section-table-cell"><%:Job%></th>
+						<th class="cbi-section-table-cell"><%:Size%></th>
+						<th class="cbi-section-table-cell"><%:Modified%></th>
+						<th class="cbi-section-table-cell"><%:Schedule%></th>
+						<th class="cbi-section-table-cell"><%:Actions%></th>
+					</tr>
+				</thead>
+				<tbody>
+				<% for _, job in ipairs(jobs) do
+					local uci_job = nil
+					local path = job_dir .. "/" .. job.file
+					c:foreach("freefilesync", "job", function(section)
+						if section.config == path then
+							uci_job = section
+							return false
+						end
+					end)
+					local run_name = uci_job and uci_job.name or job.file
+					local schedule = uci_job and uci_job.schedule or ""
+					local enabled = (not uci_job) or (uci_job.enabled ~= "0")
+					local run_url = url([[admin]], [[services]], [[freefilesync]], [[run]]) .. "?name=" .. luci.http.urlencode(run_name)
+					local log_url = url([[admin]], [[services]], [[freefilesync]], [[log]]) .. "?name=" .. luci.http.urlencode(run_name)
+					local dl_url = url([[admin]], [[services]], [[freefilesync]], [[download]]) .. "?name=" .. luci.http.urlencode(job.file)
+				%>
+					<tr class="cbi-section-table-row">
+						<td class="cbi-section-table-cell"><strong><%=pcdata(job.file)%></strong></td>
+						<td class="cbi-section-table-cell"><%=job.size%> B</td>
+						<td class="cbi-section-table-cell"><%=os.date("%Y-%m-%d %H:%M", job.mtime)%></td>
+						<td class="cbi-section-table-cell">
+							<% if schedule ~= "" then %>
+								<code><%=pcdata(schedule)%></code><br />
+								<%=enabled and translate("Enabled") or translate("Disabled")%>
+							<% else %>
+								<%:Manual only%>
+							<% end %>
+						</td>
+						<td class="cbi-section-table-cell">
+							<a class="cbi-button cbi-button-apply" href="<%=run_url%>"><%:Run now%></a>
+							<a class="cbi-button" href="<%=log_url%>"><%:Log%></a>
+							<a class="cbi-button" href="<%=dl_url%>"><%:Download%></a>
+						</td>
+					</tr>
+				<% end %>
+				</tbody>
+			</table>
+		</div>
+	<% end %>
+</div>
+
+<%+footer%>
