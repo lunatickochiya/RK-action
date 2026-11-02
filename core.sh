@@ -205,26 +205,8 @@ CONFIG_DEBUG_INFO_BTF_MODULES=y
 EOF
 }
 
-# json-c 0.19 改了 apps/CMakeLists.txt 的 cmake_minimum_required 写法，
-# OpenWrt 分支里的 002-cmake-version.patch 仍按 0.18 的 "VERSION 2.8" 写，
-# host json-c 在 prepare 阶段 hunk #1 失败。按版本替换为修正版。
-function fix_libjson_c_patch() {
-	local pkg_makefile="openwrt/package/libs/libjson-c/Makefile"
-	local patch_file="openwrt/package/libs/libjson-c/patches/002-cmake-version.patch"
-	local fixed_patch="patches/libjson-c/002-cmake-version-0.19.patch"
-	[ -f "$pkg_makefile" ] || return 0
-	grep -qE '^PKG_VERSION[[:space:]]*:?=[[:space:]]*0\.19[[:space:]]*$' "$pkg_makefile" || return 0
-	if [ ! -s "$fixed_patch" ]; then
-		echo "::error ::Missing libjson-c 0.19 patch fix: $fixed_patch"
-		return 1
-	fi
-	cp -f "$fixed_patch" "$patch_file" || return 1
-	echo "----libjson-c: 002-cmake-version.patch updated for 0.19----"
-}
-
 function init_openwrt_patch_common() {
 	ensure_kernel_config_618 || return 1
-	fix_libjson_c_patch || return 1
 
 	# 启用 busybox nohup/xxd/devmem（把 Config-defaults.in 的默认值改为 y）
 	# 移植自 AP-action-IPQ 113846b（devmem 为追加）
