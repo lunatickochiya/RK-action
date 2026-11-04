@@ -405,6 +405,7 @@ define Package/autoset-resize-rootfs-script/install
 	$(INSTALL_BIN) ./files/fix-emmc.sh $(1)/root/fix-emmc.sh
 	$(INSTALL_BIN) ./files/create_last_partition.sh $(1)/root/create_last_partition.sh
 	$(INSTALL_BIN) ./files/resizep3to6G_p4_format.sh $(1)/root/resizep3to6G_p4_format.sh
+	$(INSTALL_BIN) ./files/restore-partitions.sh $(1)/root/restore-partitions.sh
 endef
 
 define Package/luci-temperature-script/install
