@@ -206,7 +206,6 @@ EOF
 }
 
 function init_openwrt_patch_common() {
-	ensure_kernel_config_618 || return 1
 
 	# 启用 busybox nohup/xxd/devmem（把 Config-defaults.in 的默认值改为 y）
 	# 移植自 AP-action-IPQ 113846b（devmem 为追加）
