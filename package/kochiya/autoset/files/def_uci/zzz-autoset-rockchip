@@ -30,6 +30,20 @@ case "$DISTRIB_RELEASE" in
 	SNAPSHOT*|25.12*|25.1[3-9]*|25.[2-9]*|2[6-9].*|[3-9][0-9].*) lan_ipaddr=192.168.10.1/24 ;;
 esac
 
+# ZTL Joyrock RK3399 has a single GMAC (eth0, used as WAN) and the ShiMeta
+# AIOT-3588A can also lack eth1 depending on the fitted Ethernet option.
+# The generated LAN bridge references eth1; without bridge_empty it is never
+# created when eth1 is absent and wireless clients associate without
+# obtaining a DHCP address.
+model="$(cat /tmp/sysinfo/model 2>/dev/null)"
+[ -n "$model" ] || model="$(tr -d '\0' < /proc/device-tree/model 2>/dev/null)"
+case "$model" in
+*"ZTL Joyrock RK3399"*|*"AIOT-3588A"*)
+	brlan="$(uci -q show network | sed -n "s/^network\.\(@device\[[0-9]*\]\)\.name='br-lan'$/\1/p" | head -n 1)"
+	[ -n "$brlan" ] && uci -q set "network.${brlan}.bridge_empty=1"
+	;;
+esac
+
 uci -q batch <<-EOF >/dev/null
 	set system.@system[0].hostname=Rockchip
 	set system.@system[0].timezone=CST-8
