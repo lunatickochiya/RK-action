@@ -1,0 +1,85 @@
+#!/bin/sh
+# AIC8800D80 "Pandora 88M80" adapters ship in USB mass-storage mode as
+# 1111:1111 and must be switched to a69c:8d80 by sending two vendor SCSI
+# CDBs (F3 followed by F2).  Other devices also use 1111:1111, so only
+# act when the USB product string starts with 88M80.
+
+[ "$ACTION" = add ] || exit 0
+
+case "$PRODUCT" in
+	1111/1111/*)
+		;;
+	*)
+		exit 0
+		;;
+esac
+
+product="$(cat "/sys$DEVPATH/product" 2>/dev/null)"
+case "$product" in
+	88M80*)
+		;;
+	*)
+		exit 0
+		;;
+esac
+
+[ -x /sbin/usbmode ] || exit 0
+
+# Rate-limit retries caused by the forced re-enumeration below.  A normal
+# unplug/replug after the window is still handled.
+stamp=/tmp/aic8800-modeswitch.last
+now=$(date +%s)
+last=$(cat "$stamp" 2>/dev/null || echo 0)
+case "$last" in
+	''|*[!0-9]*) last=0 ;;
+esac
+[ $((now - last)) -lt 30 ] && exit 0
+echo "$now" > "$stamp"
+
+# Match the exact product string, so usbmode does not touch another
+# 1111:1111 device that happens to be present at the same time.
+product="$(printf '%s' "$product" | sed 's/[\\"]//g')"
+
+# Give usb-storage time to finish probing the virtual CD-ROM.  Sending the
+# vendor CDBs too early is ignored by the device.
+sleep 2
+
+# Send each CDB in its own usbmode run.  usbmode stops after a failed CSW
+# read, so running F3 and F2 separately makes sure the second command is
+# sent even if the first response times out (the adapter does not always
+# return the CSW within usbmode's 3 second timeout).
+for msg in \
+	555342438765432100000000000010fd0000000000000000000000000000f3 \
+	555342438765432100000000000010fd0000000000000000000000000000f2
+do
+	config=/tmp/aic8800-1111-usb-mode.$$.json
+	cat > "$config" <<EOF
+{
+	"messages": [
+		"$msg"
+	],
+	"devices": {
+		"1111:1111": {
+			"uPr=$product": {
+				"response": true,
+				"msg": [ 0 ]
+			}
+		}
+	}
+}
+EOF
+	logger -t aic8800 "sending mode switch CDB to 1111:1111 ($product)"
+	/sbin/usbmode -c "$config" -s
+	rm -f "$config"
+	sleep 1
+done
+
+# Some units only apply the new mode after they are re-enumerated.  Do it
+# only when the device is still in mass-storage mode.
+if [ -r "/sys$DEVPATH/idVendor" ] &&
+   [ "$(cat "/sys$DEVPATH/idVendor")" = "1111" ]; then
+	logger -t aic8800 "re-enumerating $DEVPATH"
+	echo 0 > "/sys$DEVPATH/authorized" 2>/dev/null
+	sleep 1
+	echo 1 > "/sys$DEVPATH/authorized" 2>/dev/null
+fi
