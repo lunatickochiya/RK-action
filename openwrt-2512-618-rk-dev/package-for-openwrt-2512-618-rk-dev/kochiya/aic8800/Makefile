@@ -115,15 +115,20 @@ define Package/aic8800-usb-modeswitch
 endef
 
 define Package/aic8800-usb-modeswitch/description
- Hotplug helper which switches AIC8800D80 "Pandora 88M80" adapters from
- the 1111:1111 mass-storage mode to the a69c:8d80 Wi-Fi/Bluetooth mode.
- The USB product string is checked before sending the vendor commands, so
- unrelated 1111:1111 devices are left alone.
+ Hotplug helpers for AIC8800 based USB Wi-Fi adapters.  The usb hotplug
+ switches AIC8800D80 "Pandora 88M80" adapters from the 1111:1111
+ mass-storage mode to the a69c:8d80 Wi-Fi/Bluetooth mode; the USB product
+ string is checked before sending the vendor commands, so unrelated
+ 1111:1111 devices are left alone.  The ieee80211 hotplug enables the
+ adapter's untouched default AP section and rebinds the radio when the
+ driver registers the phy, so plugging the adapter in brings the network
+ up without manual configuration.
 endef
 
 define Package/aic8800-usb-modeswitch/install
-	$(INSTALL_DIR) $(1)/etc/hotplug.d/usb
+	$(INSTALL_DIR) $(1)/etc/hotplug.d/usb $(1)/etc/hotplug.d/ieee80211
 	$(INSTALL_BIN) ./files/aic8800-modeswitch.hotplug $(1)/etc/hotplug.d/usb/25-aic8800-modeswitch
+	$(INSTALL_BIN) ./files/aic8800-radio.hotplug $(1)/etc/hotplug.d/ieee80211/30-aic8800-radio
 endef
 
 $(eval $(call KernelPackage,aic8800))
